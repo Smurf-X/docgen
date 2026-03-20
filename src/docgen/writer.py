@@ -27,17 +27,31 @@ class Writer:
 
         lines = content.strip().split("\n")
         cleaned_lines = []
-        skip_next_empty = False
+        prev_title = None
+        found_non_title = False
 
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if stripped.startswith("# ") and not stripped.startswith("## "):
-                continue
+
             if re.match(r"^#\s+[^#]", stripped):
                 continue
-            if stripped == "" and skip_next_empty:
-                skip_next_empty = False
+
+            title_match = re.match(r"^(#{1,2})\s+(.+)$", stripped)
+            if title_match and not found_non_title:
                 continue
+
+            title_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+            if title_match:
+                current_title = title_match.group(2).strip()
+                if current_title == prev_title:
+                    continue
+                prev_title = current_title
+                found_non_title = True
+            else:
+                if stripped:
+                    found_non_title = True
+                prev_title = None
+
             cleaned_lines.append(line)
 
         result = "\n".join(cleaned_lines).strip()
