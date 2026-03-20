@@ -1,0 +1,20 @@
+llm:
+  api_base: "https://api.openai.com/v1"
+  api_key: "${OPENAI_API_KEY}"
+  model: "gpt-4o"
+  temperature: 0.7
+  max_tokens: 4096
+
+output:
+  path: "./docs"
+  language: "zh-CN"
+
+scan:
+  exclude:
+    - "node_modules"
+    - ".git"
+    - "__pycache__"
+    - "dist"
+    - "build"
+    - ".venv"
+    - "venv"
