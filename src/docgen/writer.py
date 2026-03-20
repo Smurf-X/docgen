@@ -21,7 +21,7 @@ class Writer:
 
         return str(file_path)
 
-    def write_index(self, sections: list[tuple[int, str, list[str]]]) -> str:
+    def write_index(self, chapters: list[tuple[int, str, list[str]]]) -> str:
         content = f"""# {self.project_name} 文档
 
 > 生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M")}
@@ -29,11 +29,14 @@ class Writer:
 ## 目录
 
 """
-        for section_index, section_title, subsections in sections:
-            filename = f"{section_index:02d}-{self._slugify(section_title)}.md"
-            content += f"{section_index}. [{section_title}]({filename})\n"
-            for i, sub_title in enumerate(subsections, 1):
-                content += f"   {section_index}.{i} [{sub_title}]({filename}#{self._anchor(sub_title)})\n"
+        for chapter_idx, chapter_title, subsections in chapters:
+            filename = f"{chapter_idx:02d}-{self._slugify(chapter_title)}.md"
+            content += f"{chapter_idx}. [{chapter_title}]({filename})\n"
+            for sub_idx, sub_title in enumerate(subsections, 1):
+                anchor = self._anchor(sub_title)
+                content += (
+                    f"   {chapter_idx}.{sub_idx} [{sub_title}]({filename}#{anchor})\n"
+                )
 
         index_path = self.output_path / "index.md"
         index_path.write_text(content, encoding="utf-8")
