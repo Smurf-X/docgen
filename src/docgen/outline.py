@@ -119,7 +119,7 @@ SUBSECTION_PROMPT_TEMPLATE = """你是一个技术文档专家。请根据以下
 {extra_context}
 
 要求：
-1. 子章节应该具体、有针对性，标题简洁（2-6个字为宜）
+1. 子章节应该具体、有针对性，标题简洁明了
 2. 每个子章节应该有明确的主题
 3. 如果是API相关的章节，请指定module_path（模块路径，如 sycamore/document）和class_name（类名）
 4. 子节数量控制在 2-8 个
@@ -128,7 +128,7 @@ SUBSECTION_PROMPT_TEMPLATE = """你是一个技术文档专家。请根据以下
 输出JSON格式：
 {{
   "subsections": [
-    {{"title": "子章节标题", "description": "简短描述（10-30字）", "module_path": "模块路径", "class_name": "类名"}}
+    {{"title": "子章节标题", "description": "简短描述", "module_path": "模块路径", "class_name": "类名"}}
   ]
 }}
 
