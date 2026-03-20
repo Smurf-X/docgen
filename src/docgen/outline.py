@@ -2,6 +2,16 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+DEFAULT_CHAPTERS = [
+    "项目简介",
+    "架构设计",
+    "安装指南",
+    "快速开始",
+    "API参考",
+    "使用示例",
+]
+
+
 @dataclass
 class SubSection:
     title: str
@@ -28,7 +38,7 @@ class SubSection:
 
 
 @dataclass
-class Section:
+class Chapter:
     title: str
     description: str = ""
     subsections: list[SubSection] = field(default_factory=list)
@@ -41,335 +51,158 @@ class Section:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Section":
-        section = cls(
+    def from_dict(cls, data: dict) -> "Chapter":
+        chapter = cls(
             title=data.get("title", ""), description=data.get("description", "")
         )
         for sub_data in data.get("subsections", []):
-            section.subsections.append(SubSection.from_dict(sub_data))
-        return section
+            chapter.subsections.append(SubSection.from_dict(sub_data))
+        return chapter
 
 
 @dataclass
 class Outline:
-    sections: list[Section] = field(default_factory=list)
+    chapters: list[Chapter] = field(default_factory=list)
 
     def to_dict(self):
-        return {"sections": [s.to_dict() for s in self.sections]}
+        return {"chapters": [c.to_dict() for c in self.chapters]}
 
     @classmethod
     def from_dict(cls, data: dict) -> "Outline":
         outline = cls()
-        for section_data in data.get("sections", []):
-            outline.sections.append(Section.from_dict(section_data))
+        for chapter_data in data.get("chapters", []):
+            outline.chapters.append(Chapter.from_dict(chapter_data))
         return outline
 
-    def display(self) -> str:
+    @classmethod
+    def from_chapter_titles(cls, titles: list[str]) -> "Outline":
+        outline = cls()
+        for title in titles:
+            outline.chapters.append(Chapter(title=title))
+        return outline
+
+    def get_chapter_titles(self) -> list[str]:
+        return [c.title for c in self.chapters]
+
+    def set_chapter_titles(self, titles: list[str]):
+        old_chapters = {c.title: c for c in self.chapters}
+        self.chapters = []
+        for title in titles:
+            if title in old_chapters:
+                self.chapters.append(old_chapters[title])
+            else:
+                self.chapters.append(Chapter(title=title))
+
+    def display(self, show_subsections: bool = True) -> str:
         lines = []
-        for i, section in enumerate(self.sections, 1):
-            lines.append(f"{i}. {section.title}")
-            if section.description:
-                lines.append(f"   描述: {section.description}")
-            for j, sub in enumerate(section.subsections, 1):
-                extra = (
-                    f" ({sub.module_path}/{sub.class_name})"
-                    if sub.module_path or sub.class_name
-                    else ""
-                )
-                lines.append(f"   {i}.{j} {sub.title}{extra}")
+        for i, chapter in enumerate(self.chapters, 1):
+            lines.append(f"{i}. {chapter.title}")
+            if show_subsections:
+                for j, sub in enumerate(chapter.subsections, 1):
+                    extra = (
+                        f" ({sub.module_path}/{sub.class_name})"
+                        if sub.module_path or sub.class_name
+                        else ""
+                    )
+                    lines.append(f"   {i}.{j} {sub.title}{extra}")
         return "\n".join(lines)
 
     def count_subsections(self) -> int:
-        total = 0
-        for section in self.sections:
-            total += len(section.subsections)
-        return total
-
-    def get_all_subsections(self) -> list[tuple[Section, SubSection]]:
-        result = []
-        for section in self.sections:
-            for sub in section.subsections:
-                result.append((section, sub))
-        return result
+        return sum(len(c.subsections) for c in self.chapters)
 
 
-OUTLINE_PROMPT = """你是一个技术文档专家。请根据以下项目信息，设计一份详细的用户文档大纲。
+SUBSECTION_PROMPT_TEMPLATE = """你是一个技术文档专家。请根据以下项目信息，为"{chapter_title}"章节生成子章节列表。
 
 项目信息：
 {project_info}
 
-请按照以下结构生成大纲，每个章节可以有多个子章节。子章节可以指定对应的模块路径或类名，用于生成API文档。
+{extra_context}
 
-输出JSON格式示例：
+要求：
+1. 子章节应该具体、有针对性
+2. 每个子章节应该有明确的主题
+3. 如果是API相关的章节，请指定module_path（模块路径，如 sycamore/document）和class_name（类名）
+4. 子节数量控制在 2-8 个
+
+输出JSON格式：
 {{
-  "sections": [
-    {{
-      "title": "项目简介",
-      "description": "介绍项目背景和核心概念",
-      "subsections": [
-        {{"title": "项目背景", "description": "项目解决什么问题"}},
-        {{"title": "核心概念", "description": "DocSet, Document等核心概念"}}
-      ]
-    }},
-    {{
-      "title": "架构设计",
-      "description": "系统架构说明",
-      "subsections": [
-        {{"title": "整体架构", "description": "系统架构图和说明"}},
-        {{"title": "数据流", "description": "数据处理流程"}}
-      ]
-    }},
-    {{
-      "title": "安装指南",
-      "description": "安装和配置说明",
-      "subsections": [
-        {{"title": "环境要求", "description": "Python版本、依赖等"}},
-        {{"title": "安装步骤", "description": "pip install等"}}
-      ]
-    }},
-    {{
-      "title": "快速开始",
-      "description": "快速上手指南",
-      "subsections": [
-        {{"title": "Hello World", "description": "最简单的示例"}},
-        {{"title": "基本流程", "description": "读取-处理-写入的基本流程"}}
-      ]
-    }},
-    {{
-      "title": "核心API",
-      "description": "核心类和接口说明",
-      "subsections": [
-        {{"title": "Document类", "description": "文档对象", "module_path": "sycamore/document", "class_name": "Document"}},
-        {{"title": "DocSet类", "description": "文档集合", "module_path": "sycamore/docset", "class_name": "DocSet"}}
-      ]
-    }},
-    {{
-      "title": "连接器",
-      "description": "数据源连接器",
-      "subsections": [
-        {{"title": "文件连接器", "description": "文件读写", "module_path": "sycamore/connectors/file"}},
-        {{"title": "Elasticsearch连接器", "description": "ES读写", "module_path": "sycamore/connectors/elasticsearch"}}
-      ]
-    }},
-    {{
-      "title": "转换器",
-      "description": "数据处理转换器",
-      "subsections": [
-        {{"title": "文本提取", "description": "提取文本内容", "module_path": "sycamore/transforms/text_extraction"}},
-        {{"title": "表格提取", "description": "提取表格数据", "module_path": "sycamore/transforms/extract_table"}}
-      ]
-    }},
-    {{
-      "title": "使用示例",
-      "description": "完整的使用示例",
-      "subsections": [
-        {{"title": "PDF文档处理", "description": "处理PDF文件的完整示例"}},
-        {{"title": "RAG应用", "description": "构建RAG应用的示例"}}
-      ]
-    }},
-    {{
-      "title": "开发指南",
-      "description": "贡献代码指南",
-      "subsections": [
-        {{"title": "开发环境", "description": "搭建开发环境"}},
-        {{"title": "贡献流程", "description": "如何贡献代码"}}
-      ]
-    }}
+  "subsections": [
+    {{"title": "子章节标题", "description": "简短描述", "module_path": "模块路径", "class_name": "类名"}}
   ]
 }}
-
-请根据项目实际情况调整章节内容。确保：
-1. 每个章节有明确的目标
-2. 子章节划分合理，每个子章节应该足够具体
-3. 对于API相关的子章节，尽量指定module_path和class_name
-4. 大纲应该覆盖项目的所有重要功能
 
 只输出JSON，不要有其他内容。
 """
 
 
-SECTION_PROMPTS = {
-    "项目简介": """请为以下项目生成"{subsection_title}"子章节的文档内容。
-
-项目信息：
-{project_info}
-
-子章节描述：{subsection_description}
-
-要求：
-1. 用中文撰写，语言简洁清晰
-2. 内容要完整、准确
-3. 使用Markdown格式
-4. 如果是"核心概念"部分，请用表格或列表清晰展示每个概念
-
-直接输出Markdown内容，不要用代码块包裹：
-""",
-    "架构设计": """请为以下项目生成"{subsection_title}"子章节的文档内容。
-
-项目信息：
-{project_info}
-
-模块信息：
-{module_info}
-
-子章节描述：{subsection_description}
-
-要求：
-1. 用中文撰写
-2. 如果是整体架构，请生成Mermaid架构图
-3. 如果是数据流，请说明数据处理流程
-4. 内容要完整、准确
-5. 使用Markdown格式
-
-直接输出Markdown内容：
-""",
-    "安装指南": """请为以下项目生成"{subsection_title}"子章节的文档内容。
-
-项目信息：
-{project_info}
-
-依赖信息：
-{dependencies}
-
-子章节描述：{subsection_description}
-
-要求：
-1. 用中文撰写
-2. 给出具体的安装命令
-3. 说明环境要求
-4. 使用Markdown格式，命令用```bash包裹
-
-直接输出Markdown内容：
-""",
-    "快速开始": """请为以下项目生成"{subsection_title}"子章节的文档内容。
-
-项目信息：
-{project_info}
-
-示例代码：
-{example_code}
-
-子章节描述：{subsection_description}
-
-要求：
-1. 用中文撰写
-2. 提供可运行的代码示例
-3. 解释代码的每一步
-4. 使用Markdown格式，代码用```python包裹
-
-直接输出Markdown内容：
-""",
-    "核心API": """请为以下项目生成"{subsection_title}"的API文档。
-
-项目信息：
-{project_info}
-
-API详细信息：
-{api_info}
-
-要求：
-1. 用中文撰写
-2. 包含类/函数的用途说明
-3. 包含参数说明（参数名、类型、含义）
-4. 包含返回值说明
-5. 包含使用示例
-6. 使用Markdown格式
-
-直接输出Markdown内容：
-""",
-    "连接器": """请为以下项目生成"{subsection_title}"的文档。
-
-项目信息：
-{project_info}
-
-连接器API信息：
-{api_info}
-
-要求：
-1. 用中文撰写
-2. 说明连接器的用途和适用场景
-3. 给出初始化参数
-4. 提供使用示例
-5. 使用Markdown格式
-
-直接输出Markdown内容：
-""",
-    "转换器": """请为以下项目生成"{subsection_title}"的文档。
-
-项目信息：
-{project_info}
-
-转换器API信息：
-{api_info}
-
-要求：
-1. 用中文撰写
-2. 说明转换器的功能和用途
-3. 给出参数说明
-4. 提供使用示例
-5. 使用Markdown格式
-
-直接输出Markdown内容：
-""",
-    "使用示例": """请为以下项目生成"{subsection_title}"的完整示例文档。
-
-项目信息：
-{project_info}
-
-相关API：
-{api_info}
-
-子章节描述：{subsection_description}
-
-要求：
-1. 用中文撰写
-2. 提供完整的、可运行的代码示例
-3. 详细解释代码的每个步骤
-4. 包含预期输出或结果说明
-5. 使用Markdown格式
-
-直接输出Markdown内容：
-""",
-    "开发指南": """请为以下项目生成"{subsection_title}"子章节的文档内容。
-
-项目信息：
-{project_info}
-
-子章节描述：{subsection_description}
-
-要求：
-1. 用中文撰写
-2. 内容要完整、具体
-3. 如果是开发环境搭建，给出具体步骤
-4. 如果是贡献流程，说明具体流程
-5. 使用Markdown格式
-
-直接输出Markdown内容：
-""",
+CHAPTER_PROMPTS = {
+    "项目简介": """这个章节介绍项目的背景、目的和核心概念。
+请生成如：项目背景、核心特性、核心概念等子章节。""",
+    "架构设计": """这个章节介绍系统架构。
+请生成如：整体架构、数据流、核心模块等子章节。
+如果项目有特殊的技术组件，请包含相关子章节。""",
+    "安装指南": """这个章节介绍如何安装和配置。
+请生成如：环境要求、安装步骤、配置说明等子章节。""",
+    "快速开始": """这个章节帮助用户快速上手。
+请生成如：Hello World、基本用法、常见场景等子章节。""",
+    "API参考": """这个章节介绍项目的API。
+请根据项目结构，按模块分类生成子章节。
+每个子章节应对应一个模块或一组相关类。
+请务必填写module_path字段，指向模块路径。""",
+    "使用示例": """这个章节提供完整的使用示例。
+请生成如：基础示例、进阶示例、常见场景等子章节。""",
+    "开发指南": """这个章节帮助开发者贡献代码。
+请生成如：开发环境、测试指南、贡献流程等子章节。""",
 }
 
 
-def get_outline_prompt(project_info: str) -> str:
-    return OUTLINE_PROMPT.format(project_info=project_info)
+CONTENT_PROMPT_TEMPLATE = """你是一个技术文档专家。请为以下项目生成"{subsection_title}"的内容。
+
+项目信息：
+{project_info}
+
+章节：{chapter_title}
+子章节：{subsection_title}
+描述：{subsection_description}
+
+{api_info}
+
+要求：
+1. 用中文撰写，语言简洁清晰
+2. 内容要完整、准确、实用
+3. 如果是API文档，请包含参数说明、返回值、使用示例
+4. 如果是教程，请提供可运行的代码示例
+5. 使用Markdown格式
+
+直接输出Markdown内容，不要用代码块包裹：
+"""
 
 
-def get_section_prompt(
-    section_title: str,
+def get_subsection_prompt(
+    chapter_title: str, project_info: str, extra_context: str = ""
+) -> str:
+    chapter_context = CHAPTER_PROMPTS.get(chapter_title, "")
+    full_context = (
+        f"{chapter_context}\n\n{extra_context}" if extra_context else chapter_context
+    )
+    return SUBSECTION_PROMPT_TEMPLATE.format(
+        chapter_title=chapter_title,
+        project_info=project_info,
+        extra_context=full_context,
+    )
+
+
+def get_content_prompt(
+    chapter_title: str,
     subsection_title: str,
     subsection_description: str,
     project_info: str,
-    module_info: str = "",
     api_info: str = "",
-    example_code: str = "",
-    dependencies: str = "",
 ) -> str:
-    template = SECTION_PROMPTS.get(section_title, SECTION_PROMPTS["项目简介"])
-    return template.format(
+    return CONTENT_PROMPT_TEMPLATE.format(
         subsection_title=subsection_title,
         subsection_description=subsection_description,
+        chapter_title=chapter_title,
         project_info=project_info,
-        module_info=module_info,
-        api_info=api_info,
-        example_code=example_code,
-        dependencies=dependencies,
+        api_info=api_info if api_info else "（无额外API信息）",
     )
