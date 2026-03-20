@@ -16,10 +16,34 @@ class Writer:
         filename = f"{section_index:02d}-{self._slugify(section_title)}.md"
         file_path = self.output_path / filename
 
-        full_content = f"# {section_title}\n\n{content}"
+        cleaned_content = self._clean_content(content)
+        full_content = f"# {section_title}\n\n{cleaned_content}"
         file_path.write_text(full_content, encoding="utf-8")
 
         return str(file_path)
+
+    def _clean_content(self, content: str) -> str:
+        import re
+
+        lines = content.strip().split("\n")
+        cleaned_lines = []
+        skip_next_empty = False
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith("# ") and not stripped.startswith("## "):
+                continue
+            if re.match(r"^#\s+[^#]", stripped):
+                continue
+            if stripped == "" and skip_next_empty:
+                skip_next_empty = False
+                continue
+            cleaned_lines.append(line)
+
+        result = "\n".join(cleaned_lines).strip()
+        result = re.sub(r"\n{3,}", "\n\n", result)
+
+        return result
 
     def write_index(self, chapters: list[tuple[int, str, list[str]]]) -> str:
         content = f"""# {self.project_name} 文档

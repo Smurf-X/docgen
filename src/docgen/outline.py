@@ -119,19 +119,22 @@ SUBSECTION_PROMPT_TEMPLATE = """你是一个技术文档专家。请根据以下
 {extra_context}
 
 要求：
-1. 子章节应该具体、有针对性
+1. 子章节应该具体、有针对性，标题简洁（2-6个字为宜）
 2. 每个子章节应该有明确的主题
 3. 如果是API相关的章节，请指定module_path（模块路径，如 sycamore/document）和class_name（类名）
 4. 子节数量控制在 2-8 个
+5. 子章节标题不要与主章节标题重复
 
 输出JSON格式：
 {{
   "subsections": [
-    {{"title": "子章节标题", "description": "简短描述", "module_path": "模块路径", "class_name": "类名"}}
+    {{"title": "子章节标题", "description": "简短描述（10-30字）", "module_path": "模块路径", "class_name": "类名"}}
   ]
 }}
 
-只输出JSON，不要有其他内容。
+重要：
+- 只输出JSON，不要有其他内容
+- title 和 description 要简洁，不要包含换行或特殊字符
 """
 
 
@@ -174,7 +177,13 @@ CONTENT_PROMPT_TEMPLATE = """你是一个技术文档专家。请为以下项目
 4. 如果是教程，请提供可运行的代码示例
 5. 使用Markdown格式
 
-直接输出Markdown内容，不要用代码块包裹：
+重要格式要求：
+- 【禁止】输出一级标题（# 标题），因为系统会自动添加
+- 【允许】使用二级标题（## 标题）及以下层级
+- 只使用上面提供的项目信息和API信息，不要编造不存在的API或功能
+- 代码示例中的导入语句和API调用必须是真实存在的
+
+直接输出Markdown内容，不要用代码块包裹整个内容：
 """
 
 
