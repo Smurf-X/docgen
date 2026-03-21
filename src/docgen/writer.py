@@ -28,16 +28,11 @@ class Writer:
         lines = content.strip().split("\n")
         cleaned_lines = []
         prev_title = None
-        found_non_title = False
 
         for i, line in enumerate(lines):
             stripped = line.strip()
 
             if re.match(r"^#\s+[^#]", stripped):
-                continue
-
-            title_match = re.match(r"^(#{1,2})\s+(.+)$", stripped)
-            if title_match and not found_non_title:
                 continue
 
             title_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
@@ -46,10 +41,7 @@ class Writer:
                 if current_title == prev_title:
                     continue
                 prev_title = current_title
-                found_non_title = True
             else:
-                if stripped:
-                    found_non_title = True
                 prev_title = None
 
             cleaned_lines.append(line)
