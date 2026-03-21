@@ -11,6 +11,22 @@ DEFAULT_CHAPTERS = [
     "使用示例",
 ]
 
+OPERATOR_CHAPTERS = [
+    "项目简介",
+    "核心概念",
+    "安装指南",
+    "快速开始",
+    "配置说明",
+    "算子参考",
+    "使用示例",
+]
+
+
+def get_default_chapters(project_type: str = "general") -> list[str]:
+    if project_type == "operator":
+        return OPERATOR_CHAPTERS.copy()
+    return DEFAULT_CHAPTERS.copy()
+
 
 @dataclass
 class SubSection:
@@ -156,6 +172,14 @@ CHAPTER_PROMPTS = {
 请生成如：基础示例、进阶示例、常见场景等子章节。""",
     "开发指南": """这个章节帮助开发者贡献代码。
 请生成如：开发环境、测试指南、贡献流程等子章节。""",
+    "核心概念": """这个章节介绍项目的核心概念和术语。
+请生成如：数据模型、处理流程、执行引擎等子章节。
+重点解释用户需要理解的关键概念，避免深入技术细节。""",
+    "配置说明": """这个章节介绍项目配置。
+请生成如：配置文件格式、常用配置项、高级配置等子章节。""",
+    "算子参考": """这个章节介绍数据处理算子。
+请根据算子功能分类生成子章节，如：文本处理、图像处理、数据过滤等。
+不需要填写module_path，算子详情会自动生成。""",
 }
 
 

@@ -14,9 +14,10 @@ from . import __version__
 from .config import Config
 from .scanner import Scanner, ProjectInfo
 from .analyzer import CodeAnalyzer
-from .outline import Outline, DEFAULT_CHAPTERS
+from .outline import Outline, DEFAULT_CHAPTERS, OPERATOR_CHAPTERS, get_default_chapters
 from .generator import Generator
 from .writer import Writer
+from .op_analyzer import OperatorAnalyzer
 
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -69,12 +70,29 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
         scanner = Scanner(project_path, config.scan.exclude)
         project_info = scanner.scan()
         analyzer = CodeAnalyzer(project_path)
+        op_analyzer = OperatorAnalyzer(project_path)
+
+        project_type = "general"
+        if op_analyzer.has_operators():
+            op_count = op_analyzer.get_operator_count()
+            total_ops = sum(op_count.values())
+            if total_ops >= 10:
+                project_type = "operator"
 
     display_project_info(project_info)
 
+    if project_type == "operator":
+        console.print("\n[cyan]检测到算子类项目，将使用算子专用文档模板[/]")
+        op_count = op_analyzer.get_operator_count()
+        op_summary = ", ".join([f"{k}: {v}个" for k, v in op_count.items()])
+        console.print(f"[cyan]算子统计: {op_summary}[/]")
+
     console.print("\n[bold]步骤 2/5: 确认章节[/]")
+
+    default_chapters = get_default_chapters(project_type)
+
     console.print("默认章节：")
-    for i, chapter in enumerate(DEFAULT_CHAPTERS, 1):
+    for i, chapter in enumerate(default_chapters, 1):
         console.print(f"  {i}. {chapter}")
 
     if not auto_confirm:
@@ -86,9 +104,9 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
         if user_input:
             chapters = [c.strip() for c in user_input.split(",") if c.strip()]
         else:
-            chapters = DEFAULT_CHAPTERS.copy()
+            chapters = default_chapters.copy()
     else:
-        chapters = DEFAULT_CHAPTERS.copy()
+        chapters = default_chapters.copy()
 
     outline = Outline.from_chapter_titles(chapters)
     console.print(f"\n[green]已选择 {len(chapters)} 个章节[/]")
@@ -97,6 +115,7 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
 
     generator = Generator(config, scanner, analyzer)
     project_info_str = project_info.to_summary()
+    op_categories = []
 
     with Progress(
         SpinnerColumn(),
@@ -104,6 +123,16 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
         console=console,
     ) as progress:
         for chapter in outline.chapters:
+            if chapter.title == "算子参考":
+                task = progress.add_task(f"扫描算子...", total=None)
+                op_categories = op_analyzer.scan_operators()
+                total_ops = sum(len(cat.operators) for cat in op_categories)
+                progress.update(
+                    task,
+                    description=f"✓ 算子参考: {len(op_categories)} 类, {total_ops} 个算子",
+                )
+                continue
+
             task = progress.add_task(f"生成 {chapter.title} 的子章节...", total=None)
 
             try:
@@ -121,6 +150,11 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
     console.print("\n[cyan]生成的子章节：[/]")
     console.print(outline.display())
 
+    if op_categories:
+        console.print("\n[cyan]算子分类：[/]")
+        for cat in op_categories:
+            console.print(f"  - {cat.name}: {len(cat.operators)} 个算子")
+
     if not auto_confirm:
         confirm = input("\n确认继续？(y/n): ").strip().lower()
         if confirm != "y":
@@ -131,6 +165,8 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
 
     writer = Writer(config.output.path, project_info.name)
     total_subsections = outline.count_subsections()
+    if op_categories:
+        total_subsections += len(op_categories)
 
     with Progress(
         SpinnerColumn(),
@@ -141,6 +177,25 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
         task = progress.add_task("生成文档...", total=total_subsections)
 
         for chapter_idx, chapter in enumerate(outline.chapters, 1):
+            if chapter.title == "算子参考" and op_categories:
+                progress.update(task, description=f"生成: 算子参考")
+                op_content_parts = []
+                subsection_titles = []
+
+                for cat in op_categories:
+                    cat_md = cat.to_markdown()
+                    op_content_parts.append(cat_md)
+                    subsection_titles.append(cat.name)
+                    progress.advance(task)
+
+                if op_content_parts:
+                    full_content = "\n\n".join(op_content_parts)
+                    file_path = writer.write_section(
+                        chapter_idx, chapter.title, full_content
+                    )
+                    console.print(f"[green]✓[/] {file_path}")
+                continue
+
             chapter_content_parts = []
             subsection_titles = []
 
@@ -170,10 +225,13 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
 
     console.print("\n[bold]步骤 5/5: 生成索引[/]")
 
-    sections_for_index = [
-        (i, c.title, [s.title for s in c.subsections])
-        for i, c in enumerate(outline.chapters, 1)
-    ]
+    sections_for_index = []
+    for i, c in enumerate(outline.chapters, 1):
+        if c.title == "算子参考" and op_categories:
+            sections_for_index.append((i, c.title, [cat.name for cat in op_categories]))
+        else:
+            sections_for_index.append((i, c.title, [s.title for s in c.subsections]))
+
     index_path = writer.write_index(sections_for_index)
     console.print(f"[green]✓[/] {index_path}")
 
