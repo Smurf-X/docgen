@@ -37,9 +37,14 @@ class Writer:
 
             title_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
             if title_match:
+                level = len(title_match.group(1))
                 current_title = title_match.group(2).strip()
-                if current_title == prev_title:
+
+                if prev_title and current_title.lower() == prev_title.lower():
                     continue
+                if level == 3 and prev_title and current_title in prev_title:
+                    continue
+
                 prev_title = current_title
             else:
                 prev_title = None
