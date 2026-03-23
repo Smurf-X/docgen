@@ -54,10 +54,10 @@ def main(
     if output_path:
         config.output.path = output_path
 
-    asyncio.run(run_generation(project_path, config, yes))
+    asyncio.run(run_generation(project_path, config, config_path, yes))
 
 
-async def run_generation(project_path: str, config: Config, auto_confirm: bool):
+async def run_generation(project_path: str, config: Config, config_path: str, auto_confirm: bool):
     console.print(
         Panel.fit(
             f"[bold cyan]DocGen[/] - 文档生成工具\n版本: {__version__}",
