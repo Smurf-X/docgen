@@ -23,6 +23,7 @@ class Generator:
         self.analyzer = analyzer
         self.custom_style = ""
         self.extra_context = ""
+        self.explorer = None  # 智能探索器（可选）
         
         # 初始化 OpenAI 客户端
         self.client = AsyncOpenAI(
@@ -31,6 +32,10 @@ class Generator:
             timeout=config.llm.timeout,
             max_retries=config.llm.max_retries,
         )
+
+    def set_explorer(self, explorer):
+        """设置智能探索器"""
+        self.explorer = explorer
 
     async def check_connection(self) -> tuple[bool, str]:
         """检查 LLM API 连通性
@@ -89,7 +94,20 @@ class Generator:
     ) -> str:
         api_info = ""
 
-        if subsection.module_path:
+        # 使用智能探索器获取精准代码信息（优先）
+        if self.explorer:
+            code_info = self.explorer.get_code_for_subsection(
+                subsection.title,
+                subsection.module_path,
+                subsection.class_name,
+            )
+            if code_info.get("class_info") or code_info.get("examples"):
+                formatted_info = self.explorer.format_code_info_for_prompt(code_info)
+                if formatted_info:
+                    api_info = formatted_info
+        
+        # 如果没有探索器或探索器没有找到，使用传统方式
+        if not api_info and subsection.module_path:
             module_info = self.analyzer.get_api_summary([subsection.module_path])
 
             if subsection.class_name:

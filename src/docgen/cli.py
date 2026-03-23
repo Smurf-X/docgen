@@ -122,12 +122,16 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
 
     # 项目探索模式
     overview = None
+    explorer = None
     if enable_explore:
         console.print("\n[bold]步骤 2/6: 项目探索分析[/]")
         console.print("[cyan]正在分析项目结构...[/]")
         
         explorer = Explorer(config, scanner)
         overview = await explorer.explore()
+        
+        # 将 explorer 传递给 generator
+        generator.set_explorer(explorer)
         
         # 显示探索结果
         console.print(f"\n[green]项目类型: {overview.project_type}[/]")

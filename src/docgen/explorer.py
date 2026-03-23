@@ -631,3 +631,487 @@ class Explorer:
                 lines.append(f"- {cls['name']} ({cls['module']})")
         
         return "\n".join(lines)
+
+    # ========================================
+    # 智能文件读取方法（模拟 ls/grep 命令）
+    # ========================================
+
+    def smart_ls(self, path: str = None, max_depth: int = 2) -> dict:
+        """
+        模拟 ls 命令，返回目录结构摘要
+        只返回结构信息，不读取文件内容
+        """
+        target = Path(path) if path else self.project_path
+        
+        result = {
+            "dirs": [],
+            "files": [],
+            "tree": "",
+            "python_files": 0,
+            "total_lines": 0,
+        }
+        
+        lines = []
+        
+        def walk(current: Path, prefix: str = "", depth: int = 0):
+            if depth > max_depth:
+                return
+            
+            try:
+                items = sorted(current.iterdir(), key=lambda x: (not x.is_dir(), x.name))
+            except PermissionError:
+                return
+            
+            dirs = [x for x in items if x.is_dir() and not self.scanner._should_exclude(x)]
+            files = [x for x in items if x.is_file() and not self.scanner._should_exclude(x)]
+            
+            for d in dirs[:20]:
+                rel_dir = str(d.relative_to(self.project_path))
+                result["dirs"].append(rel_dir)
+                lines.append(f"{prefix}├── {d.name}/")
+                walk(d, prefix + "│   ", depth + 1)
+            
+            if len(dirs) > 20:
+                lines.append(f"{prefix}├── ... ({len(dirs) - 20} more dirs)")
+            
+            for f in files[:30]:
+                rel_file = str(f.relative_to(self.project_path))
+                result["files"].append(rel_file)
+                if f.suffix == ".py":
+                    result["python_files"] += 1
+                lines.append(f"{prefix}├── {f.name}")
+            
+            if len(files) > 30:
+                lines.append(f"{prefix}└── ... ({len(files) - 30} more files)")
+        
+        lines.append(f"{target.name}/")
+        walk(target, "")
+        result["tree"] = "\n".join(lines)
+        
+        return result
+
+    def smart_read_head(self, file_path: str, lines: int = 50) -> str:
+        """
+        模拟 head 命令，只读取文件开头部分
+        """
+        try:
+            full_path = self.project_path / file_path
+            content = full_path.read_text(encoding="utf-8")
+            return "\n".join(content.splitlines()[:lines])
+        except Exception as e:
+            return f"# 读取失败: {e}"
+
+    def smart_grep_class(self, class_name: str, context_lines: int = 40) -> dict:
+        """
+        模拟 grep -A N，精准获取类定义
+        只返回类定义部分，不返回整个文件
+        """
+        import re
+        
+        result = {
+            "found": False,
+            "file": "",
+            "definition": "",
+            "docstring": "",
+            "methods": [],
+            "init_params": [],
+        }
+        
+        # 首先在已扫描的文件中查找
+        for rel_path, file_info in self._files_info.items():
+            for cls in file_info.classes:
+                if cls.name == class_name:
+                    result["found"] = True
+                    result["file"] = rel_path
+                    result["docstring"] = cls.docstring
+                    result["methods"] = [{"name": m.name, "params": m.params, "return": m.return_annotation} for m in cls.methods]
+                    result["init_params"] = cls.init_params
+                    
+                    # 读取完整的类定义代码
+                    try:
+                        full_path = self.project_path / rel_path
+                        content = full_path.read_text(encoding="utf-8")
+                        class_def = self._extract_class_code(content, class_name, context_lines)
+                        result["definition"] = class_def
+                    except:
+                        pass
+                    
+                    return result
+        
+        return result
+
+    def _extract_class_code(self, content: str, class_name: str, max_lines: int = 40) -> str:
+        """
+        从文件内容中提取类定义代码
+        """
+        import re
+        
+        lines = content.splitlines()
+        pattern = rf"^(class\s+{re.escape(class_name)}\s*.*?):"
+        
+        for i, line in enumerate(lines):
+            if re.match(pattern, line):
+                # 找到类定义，提取到下一个顶级定义为止
+                class_lines = [line]
+                base_indent = len(line) - len(line.lstrip())
+                
+                for j in range(i + 1, min(i + max_lines + 1, len(lines))):
+                    next_line = lines[j]
+                    
+                    # 空行继续
+                    if not next_line.strip():
+                        class_lines.append(next_line)
+                        continue
+                    
+                    next_indent = len(next_line) - len(next_line.lstrip())
+                    
+                    # 如果缩进回到类定义层级或更低，检查是否是新的顶级定义
+                    if next_indent <= base_indent and next_line.strip():
+                        # 检查是否是新的类或函数定义
+                        if re.match(r"^(class |def |async def |@)", next_line):
+                            break
+                    
+                    class_lines.append(next_line)
+                
+                return "\n".join(class_lines)
+        
+        return ""
+
+    def smart_grep_function(self, func_name: str, context_lines: int = 20) -> dict:
+        """
+        模拟 grep -A N，精准获取函数定义
+        """
+        import re
+        
+        result = {
+            "found": False,
+            "file": "",
+            "definition": "",
+            "docstring": "",
+            "params": [],
+            "return_type": "",
+        }
+        
+        # 在已扫描的文件中查找
+        for rel_path, file_info in self._files_info.items():
+            for func in file_info.functions:
+                if func.name == func_name:
+                    result["found"] = True
+                    result["file"] = rel_path
+                    result["docstring"] = func.docstring
+                    result["params"] = func.params
+                    result["return_type"] = func.return_annotation
+                    
+                    # 读取函数定义代码
+                    try:
+                        full_path = self.project_path / rel_path
+                        content = full_path.read_text(encoding="utf-8")
+                        func_def = self._extract_function_code(content, func_name, context_lines)
+                        result["definition"] = func_def
+                    except:
+                        pass
+                    
+                    return result
+            
+            # 也检查类方法
+            for cls in file_info.classes:
+                for method in cls.methods:
+                    if method.name == func_name:
+                        result["found"] = True
+                        result["file"] = rel_path
+                        result["docstring"] = method.docstring
+                        result["params"] = method.params
+                        result["return_type"] = method.return_annotation
+                        
+                        try:
+                            full_path = self.project_path / rel_path
+                            content = full_path.read_text(encoding="utf-8")
+                            func_def = self._extract_method_code(content, cls.name, func_name, context_lines)
+                            result["definition"] = func_def
+                        except:
+                            pass
+                        
+                        return result
+        
+        return result
+
+    def _extract_function_code(self, content: str, func_name: str, max_lines: int = 20) -> str:
+        """从文件内容中提取函数定义代码"""
+        import re
+        
+        lines = content.splitlines()
+        pattern = rf"^(async\s+)?def\s+{re.escape(func_name)}\s*\("
+        
+        for i, line in enumerate(lines):
+            if re.match(pattern, line):
+                func_lines = [line]
+                base_indent = len(line) - len(line.lstrip())
+                
+                for j in range(i + 1, min(i + max_lines + 1, len(lines))):
+                    next_line = lines[j]
+                    
+                    if not next_line.strip():
+                        func_lines.append(next_line)
+                        continue
+                    
+                    next_indent = len(next_line) - len(next_line.lstrip())
+                    
+                    if next_indent <= base_indent and next_line.strip():
+                        if re.match(r"^(def |async def |class |@)", next_line):
+                            break
+                    
+                    func_lines.append(next_line)
+                
+                return "\n".join(func_lines)
+        
+        return ""
+
+    def _extract_method_code(self, content: str, class_name: str, method_name: str, max_lines: int = 20) -> str:
+        """从文件内容中提取方法定义代码"""
+        import re
+        
+        lines = content.splitlines()
+        class_pattern = rf"^class\s+{re.escape(class_name)}\s*.*?:"
+        method_pattern = rf"^\s+(async\s+)?def\s+{re.escape(method_name)}\s*\("
+        
+        in_class = False
+        class_indent = 0
+        
+        for i, line in enumerate(lines):
+            if re.match(class_pattern, line):
+                in_class = True
+                class_indent = len(line) - len(line.lstrip())
+                continue
+            
+            if in_class and re.match(method_pattern, line):
+                method_lines = [line]
+                method_indent = len(line) - len(line.lstrip())
+                
+                for j in range(i + 1, min(i + max_lines + 1, len(lines))):
+                    next_line = lines[j]
+                    
+                    if not next_line.strip():
+                        method_lines.append(next_line)
+                        continue
+                    
+                    next_indent = len(next_line) - len(next_line.lstrip())
+                    
+                    if next_indent <= method_indent and next_line.strip():
+                        break
+                    
+                    method_lines.append(next_line)
+                
+                return "\n".join(method_lines)
+        
+        return ""
+
+    def smart_grep_usage(self, symbol_name: str, max_examples: int = 3) -> list:
+        """
+        搜索符号的使用示例
+        优先搜索 tests/ 和 examples/ 目录
+        """
+        import re
+        
+        examples = []
+        pattern = rf"\b{re.escape(symbol_name)}\b"
+        
+        # 优先搜索的目录
+        search_dirs = ["tests", "test", "examples", "example", "docs"]
+        
+        for search_dir in search_dirs:
+            dir_path = self.project_path / search_dir
+            if not dir_path.exists():
+                continue
+            
+            for py_file in dir_path.rglob("*.py"):
+                if self.scanner._should_exclude(py_file):
+                    continue
+                
+                try:
+                    content = py_file.read_text(encoding="utf-8")
+                    lines = content.splitlines()
+                    
+                    for i, line in enumerate(lines):
+                        if re.search(pattern, line):
+                            # 提取上下文代码片段
+                            start = max(0, i - 3)
+                            end = min(len(lines), i + 10)
+                            snippet = "\n".join(lines[start:end])
+                            
+                            examples.append({
+                                "file": str(py_file.relative_to(self.project_path)),
+                                "line": i + 1,
+                                "snippet": snippet,
+                            })
+                            
+                            if len(examples) >= max_examples:
+                                return examples
+                except:
+                    pass
+        
+        return examples
+
+    def smart_read_init(self, module_path: str) -> dict:
+        """
+        读取 __init__.py 获取模块导出的内容
+        """
+        import re
+        
+        result = {
+            "exists": False,
+            "exports": [],
+            "imports": [],
+        }
+        
+        init_file = self.project_path / module_path / "__init__.py"
+        if not init_file.exists():
+            return result
+        
+        result["exists"] = True
+        
+        try:
+            content = init_file.read_text(encoding="utf-8")
+            lines = content.splitlines()
+            
+            for line in lines:
+                line = line.strip()
+                
+                # 匹配 from xxx import yyy
+                if match := re.match(r"from\s+\S+\s+import\s+(.+)", line):
+                    items = match.group(1).replace("(", "").replace(")", "")
+                    for item in items.split(","):
+                        item = item.strip().split(" as ")[0]
+                        if item and not item.startswith("*"):
+                            result["exports"].append(item)
+                
+                # 匹配 import xxx
+                elif match := re.match(r"import\s+(.+)", line):
+                    items = match.group(1)
+                    for item in items.split(","):
+                        item = item.strip().split(" as ")[0]
+                        if item:
+                            result["imports"].append(item)
+                
+                # 匹配 __all__
+                elif match := re.match(r"__all__\s*=\s*\[(.+)\]", line):
+                    exports = re.findall(r"['\"](\w+)['\"]", match.group(1))
+                    result["exports"].extend(exports)
+        
+        except Exception as e:
+            pass
+        
+        return result
+
+    def get_code_for_subsection(self, subsection_title: str, subsection_module: str = "", subsection_class: str = "") -> dict:
+        """
+        为文档子章节获取相关代码信息
+        整合各种智能读取方法，返回精准的代码上下文
+        """
+        result = {
+            "class_info": None,
+            "function_info": None,
+            "examples": [],
+            "related_files": [],
+        }
+        
+        # 1. 如果指定了类名，直接获取
+        if subsection_class:
+            class_info = self.smart_grep_class(subsection_class)
+            if class_info["found"]:
+                result["class_info"] = class_info
+                # 查找使用示例
+                result["examples"] = self.smart_grep_usage(subsection_class, max_examples=2)
+                return result
+        
+        # 2. 如果指定了模块路径，获取模块信息
+        if subsection_module:
+            init_info = self.smart_read_init(subsection_module)
+            if init_info["exports"]:
+                # 获取第一个导出的类作为示例
+                for export in init_info["exports"]:
+                    if export[0].isupper():  # 假设是大写的类名
+                        class_info = self.smart_grep_class(export)
+                        if class_info["found"]:
+                            result["class_info"] = class_info
+                            break
+        
+        # 3. 根据标题关键词搜索相关类
+        keywords = self._extract_keywords(subsection_title)
+        for rel_path, file_info in self._files_info.items():
+            for cls in file_info.classes:
+                if self._matches_keywords(cls.name, keywords):
+                    if result["class_info"] is None:
+                        result["class_info"] = {
+                            "found": True,
+                            "file": rel_path,
+                            "name": cls.name,
+                            "docstring": cls.docstring,
+                            "methods": [{"name": m.name} for m in cls.methods[:10]],
+                            "init_params": cls.init_params,
+                        }
+                        result["examples"] = self.smart_grep_usage(cls.name, max_examples=2)
+                        break
+        
+        return result
+
+    def _extract_keywords(self, title: str) -> list:
+        """从标题提取关键词"""
+        # 常见的停用词
+        stop_words = {"的", "和", "与", "或", "使用", "如何", "什么", "介绍", "说明", "指南", "文档"}
+        
+        words = title.replace("_", " ").replace("-", " ").split()
+        keywords = []
+        
+        for word in words:
+            word = word.lower()
+            if len(word) > 2 and word not in stop_words:
+                keywords.append(word)
+        
+        return keywords
+
+    def _matches_keywords(self, text: str, keywords: list) -> bool:
+        """检查文本是否匹配关键词"""
+        if not keywords:
+            return False
+        text_lower = text.lower()
+        return any(k in text_lower for k in keywords)
+
+    def format_code_info_for_prompt(self, code_info: dict) -> str:
+        """
+        将代码信息格式化为 prompt 可用的文本
+        控制在合理的 token 数量内
+        """
+        if not code_info.get("class_info"):
+            return ""
+        
+        lines = []
+        cls = code_info["class_info"]
+        
+        lines.append(f"### 相关代码")
+        lines.append(f"类名: {cls.get('name', 'Unknown')}")
+        lines.append(f"文件: {cls.get('file', '')}")
+        
+        if cls.get("docstring"):
+            lines.append(f"说明: {cls['docstring'][:200]}")
+        
+        if cls.get("init_params"):
+            lines.append("\n初始化参数:")
+            for param in cls["init_params"][:5]:
+                param_str = f"- {param['name']}"
+                if param.get("type"):
+                    param_str += f": {param['type']}"
+                if param.get("default"):
+                    param_str += f" = {param['default']}"
+                lines.append(param_str)
+        
+        if cls.get("methods"):
+            lines.append("\n主要方法:")
+            for method in cls["methods"][:8]:
+                lines.append(f"- {method.get('name', '')}")
+        
+        if code_info.get("examples"):
+            lines.append("\n使用示例:")
+            for example in code_info["examples"][:1]:
+                lines.append(f"```python\n{example['snippet'][:500]}\n```")
+        
+        return "\n".join(lines)
