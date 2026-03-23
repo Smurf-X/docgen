@@ -1,5 +1,8 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .explorer import ProjectOverview
 
 
 DEFAULT_CHAPTERS = [
@@ -25,6 +28,25 @@ OPERATOR_CHAPTERS = [
 def get_default_chapters(project_type: str = "general") -> list[str]:
     if project_type == "operator":
         return OPERATOR_CHAPTERS.copy()
+    elif project_type == "data_processing":
+        return [
+            "项目简介",
+            "核心概念",
+            "安装指南",
+            "快速开始",
+            "数据处理算子",
+            "使用示例",
+        ]
+    elif project_type == "etl_pipeline":
+        return [
+            "项目简介",
+            "核心概念",
+            "安装指南",
+            "快速开始",
+            "Pipeline 编排",
+            "算子参考",
+            "使用示例",
+        ]
     return DEFAULT_CHAPTERS.copy()
 
 
@@ -257,3 +279,50 @@ def get_content_prompt(
         base_prompt += f"\n\n用户自定义风格要求:\n{custom_style}"
     
     return base_prompt
+
+
+# 基于项目全貌生成文档目录的 Prompt
+OUTLINE_FROM_OVERVIEW_PROMPT = """你是一个技术文档专家。请根据以下项目全貌，生成合理的文档目录结构。
+
+{overview_content}
+
+要求：
+1. 目录要覆盖所有核心功能，不要遗漏重要模块
+2. 按用户使用顺序排列（入门 → 核心功能 → 进阶）
+3. 每个章节要有针对性，标题简洁明了
+4. 子章节要具体，对应具体的模块或功能
+5. 对于算子类项目，每个核心模块应该有对应的章节
+
+输出 JSON 格式：
+{{
+  "chapters": [
+    {{
+      "title": "章节标题",
+      "description": "章节简介",
+      "subsections": [
+        {{
+          "title": "子章节标题",
+          "description": "子章节简介",
+          "module_path": "对应的模块路径（如果有）",
+          "class_name": "对应的类名（如果有）"
+        }}
+      ]
+    }}
+  ]
+}}
+
+重要：
+- 只输出 JSON，不要有其他内容
+- 章节数量控制在 5-10 个
+- 每个章节的子节数量控制在 2-8 个
+"""
+
+
+def get_outline_from_overview_prompt(overview_content: str, custom_style: str = "") -> str:
+    """生成基于项目全貌的文档目录 prompt"""
+    prompt = OUTLINE_FROM_OVERVIEW_PROMPT.format(overview_content=overview_content)
+    
+    if custom_style:
+        prompt += f"\n\n用户自定义风格要求:\n{custom_style}"
+    
+    return prompt
