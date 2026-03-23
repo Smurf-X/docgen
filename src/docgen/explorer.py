@@ -1115,3 +1115,303 @@ class Explorer:
                 lines.append(f"```python\n{example['snippet'][:500]}\n```")
         
         return "\n".join(lines)
+
+    # ========================================
+    # 批量分类方法（针对差 LLM 优化）
+    # ========================================
+
+    # 预定义的类别选项
+    OPERATOR_CATEGORIES = [
+        "文本处理",
+        "图像处理", 
+        "音频处理",
+        "视频处理",
+        "数据存储",
+        "数据过滤",
+        "数据转换",
+        "Pipeline编排",
+        "其他",
+    ]
+
+    async def batch_classify_operators(self, batch_size: int = 20) -> dict:
+        """
+        批量分类算子类
+        
+        Args:
+            batch_size: 每批处理的类数量
+            
+        Returns:
+            {类名: 类别} 字典
+        """
+        # 确保已扫描文件
+        if not self._files_info:
+            self.scan_all_files()
+        
+        # 收集所有类信息
+        all_classes = []
+        for rel_path, file_info in self._files_info.items():
+            for cls in file_info.classes:
+                all_classes.append({
+                    "name": cls.name,
+                    "file": rel_path,
+                    "docstring": cls.docstring[:100] if cls.docstring else "",
+                    "bases": cls.bases,
+                    "methods": [m.name for m in cls.methods[:5]],
+                })
+        
+        if not all_classes:
+            return {}
+        
+        print(f"共发现 {len(all_classes)} 个类，开始批量分类...")
+        
+        # 分批处理
+        classifications = {}
+        total_batches = (len(all_classes) + batch_size - 1) // batch_size
+        
+        for i in range(0, len(all_classes), batch_size):
+            batch = all_classes[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            print(f"  分类批次 {batch_num}/{total_batches}...")
+            
+            result = await self._classify_batch(batch)
+            classifications.update(result)
+        
+        return classifications
+
+    async def _classify_batch(self, classes: list) -> dict:
+        """对一批类进行分类"""
+        
+        # 构建类列表字符串
+        class_list = []
+        for cls in classes:
+            info = f"- {cls['name']}"
+            if cls['docstring']:
+                info += f": {cls['docstring']}"
+            if cls['bases']:
+                info += f" (继承: {', '.join(cls['bases'][:2])})"
+            class_list.append(info)
+        
+        categories_str = "、".join(self.OPERATOR_CATEGORIES)
+        
+        prompt = f"""分析以下类，判断每个类所属的功能类别。
+
+类列表:
+{chr(10).join(class_list)}
+
+可选类别：
+{categories_str}
+
+输出 JSON 格式（只输出 JSON，不要其他内容）:
+{{
+  "类名1": "类别1",
+  "类名2": "类别2",
+  ...
+}}"""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.config.llm.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,  # 低温度，更确定性的输出
+                max_tokens=1000,
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # 提取 JSON
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0]
+            elif "```" in result_text:
+                result_text = result_text.split("```")[1].split("```")[0]
+            
+            result = json.loads(result_text.strip())
+            
+            # 验证类别是否有效
+            for cls_name, category in result.items():
+                if category not in self.OPERATOR_CATEGORIES:
+                    result[cls_name] = "其他"
+            
+            return result
+            
+        except Exception as e:
+            print(f"  分类失败: {e}")
+            # 返回默认分类
+            return {cls['name']: "其他" for cls in classes}
+
+    def generate_outline_from_classification(self, classifications: dict) -> "Outline":
+        """
+        根据分类结果生成文档目录
+        
+        Args:
+            classifications: {类名: 类别} 字典
+            
+        Returns:
+            Outline 对象
+        """
+        from .outline import Outline, Chapter, SubSection
+        
+        # 按类别分组
+        category_classes = {}
+        for cls_name, category in classifications.items():
+            if category not in category_classes:
+                category_classes[category] = []
+            category_classes[category].append(cls_name)
+        
+        # 创建 Outline
+        outline = Outline()
+        
+        # 添加固定章节
+        outline.chapters.append(Chapter(title="项目简介"))
+        outline.chapters.append(Chapter(title="安装指南"))
+        outline.chapters.append(Chapter(title="快速开始"))
+        
+        # 按类别添加算子章节
+        for category in self.OPERATOR_CATEGORIES:
+            if category in category_classes and category_classes[category]:
+                chapter = Chapter(title=f"{category}算子")
+                
+                for cls_name in category_classes[category]:
+                    # 获取类的文件路径
+                    module_path = self._find_class_module(cls_name)
+                    
+                    chapter.subsections.append(SubSection(
+                        title=cls_name,
+                        description="",
+                        module_path=module_path,
+                        class_name=cls_name,
+                    ))
+                
+                outline.chapters.append(chapter)
+        
+        # 添加结尾章节
+        outline.chapters.append(Chapter(title="使用示例"))
+        
+        return outline
+
+    def _find_class_module(self, class_name: str) -> str:
+        """查找类所在的模块路径"""
+        for rel_path, file_info in self._files_info.items():
+            for cls in file_info.classes:
+                if cls.name == class_name:
+                    # 返回去掉 .py 后缀的路径
+                    return rel_path.replace("/", ".").replace("\\", ".").replace(".py", "")
+        return ""
+
+    async def explore_with_classification(self) -> "ProjectOverview":
+        """
+        执行项目探索并使用批量分类
+        
+        这个方法不使用 LLM 分析目录，而是：
+        1. 扫描所有文件
+        2. 批量分类所有类
+        3. 基于分类结果生成项目全貌
+        """
+        print("第 1 层：扫描项目文件...")
+        self.scan_all_files()
+        
+        # 收集统计信息
+        dir_summary = self.get_directory_structure_summary()
+        core_dirs, auxiliary_dirs = self.identify_core_directories(dir_summary)
+        
+        print(f"  发现 {len(self._files_info)} 个文件")
+        print(f"  核心目录: {core_dirs}")
+        
+        # 批量分类
+        print("\n第 2 层：批量分类算子...")
+        classifications = await self.batch_classify_operators()
+        
+        # 统计各类别数量
+        category_counts = {}
+        for category in classifications.values():
+            category_counts[category] = category_counts.get(category, 0) + 1
+        
+        print(f"\n  分类统计:")
+        for category, count in sorted(category_counts.items(), key=lambda x: -x[1]):
+            print(f"    - {category}: {count} 个")
+        
+        # 生成项目全貌
+        print("\n第 3 层：生成项目全貌...")
+        
+        # 根据分类结果判断项目类型
+        project_type = self._determine_project_type_from_classification(category_counts)
+        
+        # 生成摘要
+        summary_parts = []
+        for category, count in sorted(category_counts.items(), key=lambda x: -x[1])[:5]:
+            if count > 0:
+                summary_parts.append(f"{category}({count}个算子)")
+        
+        summary = f"这是一个{project_type}项目，包含：" + "、".join(summary_parts)
+        
+        # 构建核心模块列表
+        core_modules = []
+        for category, classes in classifications.items():
+            if category != "其他":
+                # 找到这个类别的一个目录作为代表
+                sample_class = list(classes.keys())[0] if isinstance(classes, list) else None
+                if sample_class:
+                    module_path = self._find_class_module(sample_class)
+                    core_modules.append({
+                        "path": category,
+                        "category": category,
+                        "summary": f"{category}相关算子",
+                        "classes": [c for c, cat in classifications.items() if cat == category][:10],
+                    })
+        
+        # 关键类
+        key_classes = []
+        for cls_name, category in classifications.items():
+            if category != "其他":
+                key_classes.append({
+                    "name": cls_name,
+                    "module": category,
+                })
+        
+        overview = ProjectOverview(
+            name=self.project_path.name,
+            language=self.scanner._detect_primary_language(),
+            project_type=project_type,
+            summary=summary,
+            core_modules=core_modules[:10],
+            module_clusters={},
+            key_classes=key_classes[:30],
+        )
+        
+        # 保存分类结果供后续使用
+        self._classifications = classifications
+        
+        return overview
+
+    def _determine_project_type_from_classification(self, category_counts: dict) -> str:
+        """根据分类结果判断项目类型"""
+        
+        # 统计各类别
+        text_count = category_counts.get("文本处理", 0)
+        image_count = category_counts.get("图像处理", 0)
+        audio_count = category_counts.get("音频处理", 0)
+        video_count = category_counts.get("视频处理", 0)
+        pipeline_count = category_counts.get("Pipeline编排", 0)
+        
+        # 判断项目类型
+        modalities = []
+        if text_count > 0:
+            modalities.append("文本")
+        if image_count > 0:
+            modalities.append("图像")
+        if audio_count > 0:
+            modalities.append("音频")
+        if video_count > 0:
+            modalities.append("视频")
+        
+        if len(modalities) > 1:
+            return "多模态数据处理"
+        elif len(modalities) == 1:
+            return f"{modalities[0]}处理"
+        elif pipeline_count > 0:
+            return "ETL Pipeline"
+        else:
+            return "数据处理"
+
+    def get_classifications(self) -> dict:
+        """获取分类结果"""
+        return getattr(self, '_classifications', {})

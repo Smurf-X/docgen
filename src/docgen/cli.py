@@ -123,12 +123,15 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
     # 项目探索模式
     overview = None
     explorer = None
+    outline = None
     if enable_explore:
         console.print("\n[bold]步骤 2/6: 项目探索分析[/]")
         console.print("[cyan]正在分析项目结构...[/]")
         
         explorer = Explorer(config, scanner)
-        overview = await explorer.explore()
+        
+        # 使用批量分类方式探索（针对差 LLM 优化）
+        overview = await explorer.explore_with_classification()
         
         # 将 explorer 传递给 generator
         generator.set_explorer(explorer)
@@ -140,27 +143,30 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
         if overview.core_modules:
             console.print("\n[cyan]核心模块:[/]")
             for module in overview.core_modules[:5]:
-                console.print(f"  - {module['path']}: {module['summary']}")
+                classes_str = ", ".join(module.get('classes', [])[:3])
+                console.print(f"  - {module['path']}: {module['summary']} ({classes_str}...)")
         
         # 更新项目类型
         if overview.project_type != "general":
             project_type = overview.project_type
-
-    console.print(f"\n[bold]步骤 {'3/6' if enable_explore else '2/5'}: 确认章节[/]")
-
-    # 生成文档目录
-    outline = None
-    if enable_explore and overview:
-        # 基于项目全貌生成目录
-        console.print("[cyan]基于项目分析生成文档目录...[/]")
-        outline = await generate_outline_from_overview(generator, overview, style_content)
         
-        if outline:
+        # 直接从分类结果生成目录（不需要额外 LLM 调用）
+        console.print(f"\n[bold]步骤 3/6: 生成文档目录[/]")
+        console.print("[cyan]基于分类结果生成文档目录...[/]")
+        
+        classifications = explorer.get_classifications()
+        if classifications:
+            outline = explorer.generate_outline_from_classification(classifications)
             console.print("[green]✓ 已生成文档目录[/]")
+            console.print(f"[cyan]生成的目录结构:[/]")
+            console.print(outline.display())
         else:
-            console.print("[yellow]⚠ 自动生成目录失败，使用默认目录[/]")
-            outline = Outline.from_chapter_titles(get_default_chapters(project_type))
-    else:
+            outline = None
+    
+    # 如果探索模式没有生成目录，使用默认方式
+    if not outline:
+        console.print(f"\n[bold]步骤 {'3/6' if enable_explore else '2/5'}: 确认章节[/]")
+        
         # 使用默认章节
         default_chapters = get_default_chapters(project_type)
 
