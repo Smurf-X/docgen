@@ -1,7 +1,7 @@
-import httpx
 import json
 from typing import Optional
-from pathlib import Path
+
+from openai import AsyncOpenAI
 
 from .config import Config
 from .outline import (
@@ -21,6 +21,38 @@ class Generator:
         self.config = config
         self.scanner = scanner
         self.analyzer = analyzer
+        self.custom_style = ""
+        self.extra_context = ""
+        
+        # 初始化 OpenAI 客户端
+        self.client = AsyncOpenAI(
+            base_url=config.llm.api_base,
+            api_key=config.llm.api_key,
+            timeout=config.llm.timeout,
+            max_retries=config.llm.max_retries,
+        )
+
+    async def check_connection(self) -> tuple[bool, str]:
+        """检查 LLM API 连通性
+        
+        Returns:
+            (是否连通, 错误信息或模型名称)
+        """
+        try:
+            # 发送一个最简单的请求测试连通性
+            response = await self.client.chat.completions.create(
+                model=self.config.llm.model,
+                messages=[{"role": "user", "content": "Hi"}],
+                max_tokens=5,
+            )
+            return True, self.config.llm.model
+        except Exception as e:
+            return False, str(e)
+
+    def set_custom_style(self, style_content: str, extra_content: str = ""):
+        """设置自定义风格指南和额外上下文"""
+        self.custom_style = style_content
+        self.extra_context = extra_content
 
     async def generate_subsections_for_chapter(
         self, chapter: Chapter, project_info_str: str
@@ -31,8 +63,14 @@ class Generator:
             modules = self.scanner._identify_core_modules()
             if modules:
                 extra_context = f"项目核心模块：{', '.join(modules[:15])}"
+        
+        # 添加用户额外上下文
+        if self.extra_context:
+            extra_context = f"{extra_context}\n\n{self.extra_context}" if extra_context else self.extra_context
 
-        prompt = get_subsection_prompt(chapter.title, project_info_str, extra_context)
+        prompt = get_subsection_prompt(
+            chapter.title, project_info_str, extra_context, self.custom_style
+        )
         response = await self._call_llm(prompt)
 
         try:
@@ -95,28 +133,44 @@ class Generator:
             subsection_description=subsection.description,
             project_info=project_info_str,
             api_info=api_info,
+            custom_style=self.custom_style,
         )
 
         return await self._call_llm(prompt)
 
     async def _call_llm(self, prompt: str) -> str:
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            response = await client.post(
-                f"{self.config.llm.api_base}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {self.config.llm.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.config.llm.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": self.config.llm.temperature,
-                    "max_tokens": self.config.llm.max_tokens,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+        """调用 LLM API（支持流式和非流式）"""
+        if self.config.llm.stream:
+            return await self._call_llm_stream(prompt)
+        else:
+            return await self._call_llm_sync(prompt)
+
+    async def _call_llm_stream(self, prompt: str) -> str:
+        """流式调用 LLM API"""
+        stream = await self.client.chat.completions.create(
+            model=self.config.llm.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.config.llm.temperature,
+            max_tokens=self.config.llm.max_tokens,
+            stream=True,
+        )
+        
+        content = ""
+        async for chunk in stream:
+            if chunk.choices[0].delta.content:
+                content += chunk.choices[0].delta.content
+        
+        return content
+
+    async def _call_llm_sync(self, prompt: str) -> str:
+        """非流式调用 LLM API"""
+        response = await self.client.chat.completions.create(
+            model=self.config.llm.model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.config.llm.temperature,
+            max_tokens=self.config.llm.max_tokens,
+        )
+        return response.choices[0].message.content
 
     def _extract_json(self, text: str) -> str:
         text = text.strip()

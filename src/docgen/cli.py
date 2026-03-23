@@ -114,6 +114,25 @@ async def run_generation(project_path: str, config: Config, auto_confirm: bool):
     console.print("\n[bold]步骤 3/5: 生成子章节[/]")
 
     generator = Generator(config, scanner, analyzer)
+    
+    # 检查 LLM 连通性
+    console.print("[cyan]正在检查 LLM 连接...[/]")
+    is_connected, message = await generator.check_connection()
+    if is_connected:
+        console.print(f"[green]✓ LLM 已连接 (模型: {message})[/]")
+    else:
+        console.print(f"[red]✗ LLM 连接失败: {message}[/]")
+        console.print("[yellow]请检查配置文件中的 api_base、api_key 和 model 设置[/]")
+        return
+    
+    # 加载自定义风格指南
+    style_content, extra_content = config.load_customization_content(config_path)
+    if style_content:
+        generator.set_custom_style(style_content, extra_content)
+        console.print("[cyan]已加载自定义风格指南[/]")
+    if extra_content:
+        console.print("[cyan]已加载额外上下文[/]")
+    
     project_info_str = project_info.to_summary()
     op_categories = []
 

@@ -4,6 +4,9 @@ llm:
   model: "gpt-4o"
   temperature: 0.7
   max_tokens: 4096
+  timeout: 300          # 请求超时时间（秒），默认 300
+  max_retries: 3        # 最大重试次数，默认 3
+  stream: true          # 是否使用流式输出，默认 true（推荐开启，避免长时间生成超时）
 
 output:
   path: "./docs"
@@ -18,3 +21,10 @@ scan:
     - "build"
     - ".venv"
     - "venv"
+
+# 自定义文档风格配置（可选）
+customization:
+  # 风格指南文件路径，支持相对路径（相对于此配置文件）或绝对路径
+  # style_guide: "./style-guide.md"
+  # 额外上下文文件路径，可用于提供项目特定信息
+  # extra_context: "./extra-notes.md"

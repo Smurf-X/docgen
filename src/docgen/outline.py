@@ -214,17 +214,26 @@ CONTENT_PROMPT_TEMPLATE = """你是一个技术文档专家。请为以下项目
 
 
 def get_subsection_prompt(
-    chapter_title: str, project_info: str, extra_context: str = ""
+    chapter_title: str, 
+    project_info: str, 
+    extra_context: str = "",
+    custom_style: str = ""
 ) -> str:
     chapter_context = CHAPTER_PROMPTS.get(chapter_title, "")
     full_context = (
         f"{chapter_context}\n\n{extra_context}" if extra_context else chapter_context
     )
+    
+    # 添加自定义风格指南
+    style_section = ""
+    if custom_style:
+        style_section = f"\n\n用户自定义风格要求:\n{custom_style}"
+    
     return SUBSECTION_PROMPT_TEMPLATE.format(
         chapter_title=chapter_title,
         project_info=project_info,
         extra_context=full_context,
-    )
+    ) + style_section
 
 
 def get_content_prompt(
@@ -233,11 +242,18 @@ def get_content_prompt(
     subsection_description: str,
     project_info: str,
     api_info: str = "",
+    custom_style: str = ""
 ) -> str:
-    return CONTENT_PROMPT_TEMPLATE.format(
+    base_prompt = CONTENT_PROMPT_TEMPLATE.format(
         subsection_title=subsection_title,
         subsection_description=subsection_description,
         chapter_title=chapter_title,
         project_info=project_info,
         api_info=api_info if api_info else "（无额外API信息）",
     )
+    
+    # 添加自定义风格指南
+    if custom_style:
+        base_prompt += f"\n\n用户自定义风格要求:\n{custom_style}"
+    
+    return base_prompt
