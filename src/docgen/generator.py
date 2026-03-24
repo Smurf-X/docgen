@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Optional, TYPE_CHECKING
 
 from openai import AsyncOpenAI
@@ -65,9 +66,19 @@ class Generator:
     async def generate_subsections_for_chapter(
         self, chapter: Chapter, project_info_str: str
     ) -> list[SubSection]:
-        api_chapter_titles = ["API参考", "API 参考", "内置算子参考", "内置算子使用"]
+        api_chapter_titles = [
+            "API参考",
+            "API 参考",
+            "内置算子参考",
+            "内置算子使用",
+            "使用内置算子",
+        ]
         if chapter.title in api_chapter_titles:
             return self._generate_api_subsections()
+
+        dev_chapter_titles = ["自定义算子开发", "自定义算子开发与使用", "开发指南"]
+        if chapter.title in dev_chapter_titles:
+            return self._generate_dev_subsections()
 
         extra_context = ""
         if self.extra_context:
@@ -177,6 +188,152 @@ class Generator:
             )
 
         return subsections
+
+    def _generate_dev_subsections(self) -> list[SubSection]:
+        """生成自定义算子开发章节的子章节"""
+        base_classes = self._scan_base_classes()
+
+        mapper_children = []
+        connector_children = []
+
+        for bc in base_classes:
+            if bc["category"] == "mapper":
+                mapper_children.append(
+                    SubSection(
+                        title=bc["class_name"],
+                        description=bc["docstring"][:100]
+                        if bc["docstring"]
+                        else f"{bc['class_name']} 基类",
+                        module_path=bc["module_path"],
+                        class_name=bc["class_name"],
+                    )
+                )
+            elif bc["category"] in ["datasource", "datasink"]:
+                connector_children.append(
+                    SubSection(
+                        title=bc["class_name"],
+                        description=bc["docstring"][:100]
+                        if bc["docstring"]
+                        else f"{bc['class_name']} 基类",
+                        module_path=bc["module_path"],
+                        class_name=bc["class_name"],
+                    )
+                )
+
+        subsections = []
+
+        subsections.append(
+            SubSection(
+                title="开发流程概述",
+                description="自定义算子的开发、注册、使用流程",
+            )
+        )
+
+        if mapper_children:
+            subsections.append(
+                SubSection(
+                    title="数据处理算子开发",
+                    description="继承 Mapper 等基类开发自定义算子",
+                    children=mapper_children,
+                )
+            )
+
+        if connector_children:
+            subsections.append(
+                SubSection(
+                    title="DataSource 与 DataSink 开发",
+                    description="开发自定义数据读取和写入算子",
+                    children=connector_children,
+                )
+            )
+
+        subsections.append(
+            SubSection(
+                title="在 YAML 中使用自定义算子",
+                description="如何配置自定义算子路径并使用",
+            )
+        )
+
+        return subsections
+
+    def _scan_base_classes(self) -> list[dict]:
+        """扫描基类文件，提取接口信息"""
+        base_classes = []
+
+        base_patterns = [
+            ("base_op.py", ["MapperOperator", "FilterOperator", "ConnectorOperator"]),
+            ("mapper", ["MapperOperator", "BaseMapper"]),
+            ("connector", ["DataSource", "DataSink", "ConnectorOperator"]),
+        ]
+
+        py_files = list(self.scanner.project_path.rglob("*.py"))
+
+        for py_file in py_files:
+            try:
+                rel_path = py_file.relative_to(self.scanner.project_path)
+                module_path = (
+                    str(rel_path.with_suffix("")).replace(os.sep, ".").replace("/", ".")
+                )
+
+                if "base" not in str(rel_path).lower():
+                    continue
+                if module_path.startswith("docs.") or module_path.startswith("test"):
+                    continue
+
+                info = self.analyzer.analyze_file(str(rel_path))
+                if info and info.classes:
+                    for cls in info.classes:
+                        if (
+                            "Base" in cls.name
+                            or "ABC" in cls.bases
+                            or cls.name.endswith("Operator")
+                        ):
+                            category = self._get_base_class_category(
+                                cls.name, cls.bases
+                            )
+                            base_classes.append(
+                                {
+                                    "class_name": cls.name,
+                                    "module_path": module_path,
+                                    "file_path": str(rel_path),
+                                    "bases": list(cls.bases),
+                                    "docstring": cls.docstring,
+                                    "methods": [
+                                        {
+                                            "name": m.name,
+                                            "parameters": [
+                                                str(p) for p in m.parameters
+                                            ],
+                                            "return_type": m.return_type,
+                                            "docstring": m.docstring,
+                                        }
+                                        for m in cls.methods
+                                    ],
+                                    "category": category,
+                                }
+                            )
+            except Exception:
+                pass
+
+        return base_classes
+
+    def _get_base_class_category(self, class_name: str, bases: list[str]) -> str:
+        """判断基类类别"""
+        name_lower = class_name.lower()
+        bases_str = " ".join(bases).lower()
+
+        if "mapper" in name_lower or "mapper" in bases_str:
+            return "mapper"
+        if "datasource" in name_lower or "datasource" in bases_str:
+            return "datasource"
+        if "datasink" in name_lower or "datasink" in bases_str:
+            return "datasink"
+        if "connector" in name_lower or "connector" in bases_str:
+            return "connector"
+        if "filter" in name_lower:
+            return "filter"
+
+        return "other"
 
     async def generate_operator_content(
         self, operator_info: dict, project_info_str: str
