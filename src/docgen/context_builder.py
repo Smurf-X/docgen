@@ -50,29 +50,30 @@ CHAPTER_CONTEXT_RULES = {
         "need_code": True,
         "writing_hints": [
             "说明如何使用 PipelineBuilder",
-            "提供 YAML 配置格式",
+            "详细介绍 YAML 配置格式和各字段含义",
             "展示算子编排方法",
+            "说明输入输出处理",
         ],
     },
-    "内置算子使用": {
+    "内置算子参考": {
         "structure_depth": 2,
         "need_relations": True,
         "need_code": True,
         "writing_hints": [
-            "列出每个算子的参数",
-            "提供使用示例",
-            "说明返回值和注意事项",
+            "按功能分类介绍算子",
+            "列出每个算子的参数、返回值",
+            "提供 YAML 配置示例",
             "只介绍具体实现类，不介绍抽象基类",
         ],
     },
-    "使用示例": {
-        "structure_depth": 1,
-        "need_relations": False,
+    "自定义算子开发": {
+        "structure_depth": 2,
+        "need_relations": True,
         "need_code": True,
         "writing_hints": [
-            "提供完整的使用场景",
-            "展示代码和配置",
-            "解释关键步骤",
+            "说明开发流程",
+            "展示如何继承基类开发",
+            "提供完整的开发、注册、配置、使用流程",
         ],
     },
     "常见问题": {
@@ -84,6 +85,15 @@ CHAPTER_CONTEXT_RULES = {
             "提供解决方案",
         ],
     },
+    "项目简介": {
+        "structure_depth": 2,
+        "need_relations": False,
+        "need_code": False,
+        "writing_hints": [
+            "介绍项目背景",
+            "说明核心特性",
+        ],
+    },
     "架构设计": {
         "structure_depth": 2,
         "need_relations": True,
@@ -92,65 +102,6 @@ CHAPTER_CONTEXT_RULES = {
             "说明整体架构",
             "解释模块职责",
             "展示类继承关系",
-        ],
-    },
-    "核心接口定义": {
-        "structure_depth": 2,
-        "need_relations": True,
-        "need_code": True,
-        "writing_hints": [
-            "列出抽象基类和接口",
-            "说明抽象方法",
-            "展示继承关系",
-        ],
-    },
-    "开发自定义算子": {
-        "structure_depth": 2,
-        "need_relations": True,
-        "need_code": True,
-        "writing_hints": [
-            "说明如何扩展基类",
-            "提供开发示例",
-            "解释关键步骤",
-        ],
-    },
-    "注册机制": {
-        "structure_depth": 1,
-        "need_relations": False,
-        "need_code": True,
-        "writing_hints": [
-            "说明 OperatorRegistry 使用",
-            "展示算子注册方法",
-            "提供配置扩展示例",
-        ],
-    },
-    "API 参考": {
-        "structure_depth": 2,
-        "need_relations": True,
-        "need_code": True,
-        "writing_hints": [
-            "列出类和方法签名",
-            "说明参数和返回值",
-            "提供使用示例",
-        ],
-    },
-    "扩展开发最佳实践": {
-        "structure_depth": 1,
-        "need_relations": False,
-        "need_code": True,
-        "writing_hints": [
-            "说明代码规范",
-            "提供测试指南",
-            "解释贡献流程",
-        ],
-    },
-    "项目简介": {
-        "structure_depth": 2,
-        "need_relations": False,
-        "need_code": False,
-        "writing_hints": [
-            "介绍项目背景",
-            "说明核心特性",
         ],
     },
     "安装指南": {
@@ -183,6 +134,16 @@ CHAPTER_CONTEXT_RULES = {
             "说明返回值和注意事项",
         ],
     },
+    "API参考": {
+        "structure_depth": 2,
+        "need_relations": True,
+        "need_code": True,
+        "writing_hints": [
+            "列出类和方法签名",
+            "说明参数和返回值",
+            "提供使用示例",
+        ],
+    },
     "开发指南": {
         "structure_depth": 2,
         "need_relations": True,
@@ -191,6 +152,16 @@ CHAPTER_CONTEXT_RULES = {
             "说明如何扩展新功能",
             "提供基类接口说明",
             "给出开发示例",
+        ],
+    },
+    "使用示例": {
+        "structure_depth": 1,
+        "need_relations": False,
+        "need_code": True,
+        "writing_hints": [
+            "提供完整的使用场景",
+            "展示代码和配置",
+            "解释关键步骤",
         ],
     },
 }

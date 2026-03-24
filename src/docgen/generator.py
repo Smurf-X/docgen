@@ -8,11 +8,9 @@ from .outline import (
     Outline,
     Chapter,
     SubSection,
-    DocType,
     get_subsection_prompt,
     get_content_prompt,
     get_content_prompt_with_context,
-    get_default_chapters_by_doc_type,
     DEFAULT_CHAPTERS,
 )
 from .scanner import Scanner
@@ -20,20 +18,6 @@ from .analyzer import CodeAnalyzer
 
 if TYPE_CHECKING:
     from .context_builder import ContextBuilder, ChapterContext
-
-BASE_CLASS_PATTERNS = [
-    "Base",
-    "Abstract",
-]
-
-
-def is_base_class(class_name: str, bases: list[str]) -> bool:
-    for pattern in BASE_CLASS_PATTERNS:
-        if pattern in class_name:
-            return True
-    if "ABC" in bases:
-        return True
-    return False
 
 
 class Generator:
@@ -53,10 +37,6 @@ class Generator:
             timeout=config.llm.timeout,
             max_retries=config.llm.max_retries,
         )
-
-    @property
-    def doc_type(self) -> DocType:
-        return self.config.doc.doc_type
 
     def set_explorer(self, explorer):
         self.explorer = explorer
@@ -85,7 +65,7 @@ class Generator:
     async def generate_subsections_for_chapter(
         self, chapter: Chapter, project_info_str: str
     ) -> list[SubSection]:
-        api_chapter_titles = ["API参考", "API 参考", "内置算子使用", "核心接口定义"]
+        api_chapter_titles = ["API参考", "API 参考", "内置算子参考", "内置算子使用"]
         if chapter.title in api_chapter_titles:
             return self._generate_api_subsections()
 
@@ -98,7 +78,6 @@ class Generator:
             project_info_str,
             extra_context,
             self.custom_style,
-            self.doc_type,
         )
         response = await self._call_llm(prompt)
 
@@ -139,10 +118,6 @@ class Generator:
                 if info and info.classes:
                     for cls in info.classes[:3]:
                         if cls.name not in seen_classes:
-                            if self.doc_type == "user_manual":
-                                if is_base_class(cls.name, list(cls.bases)):
-                                    continue
-
                             seen_classes.add(cls.name)
                             desc = (
                                 cls.docstring.split("\n")[0]
@@ -258,7 +233,6 @@ class Generator:
             project_info=project_info_str,
             context_info=context_info,
             custom_style=self.custom_style,
-            doc_type=self.doc_type,
         )
 
         return await self._call_llm(prompt)
@@ -316,7 +290,7 @@ class Generator:
         return text
 
     def _get_default_subsections(self, chapter_title: str) -> list[SubSection]:
-        user_manual_defaults = {
+        defaults = {
             "概述": [
                 SubSection(title="项目简介", description="项目背景和目的"),
                 SubSection(title="核心特性", description="项目的主要特性"),
@@ -331,51 +305,36 @@ class Generator:
                 SubSection(title="Hello World", description="最简单的示例"),
                 SubSection(title="基本使用流程", description="完整流程示例"),
             ],
-            "内置算子使用": [
-                SubSection(title="算子概览", description="内置算子列表"),
+            "Pipeline 使用指南": [
+                SubSection(
+                    title="PipelineBuilder 使用方法", description="创建和执行Pipeline"
+                ),
+                SubSection(title="YAML 配置格式详解", description="配置文件格式"),
+                SubSection(title="算子编排与执行", description="如何编排算子"),
+                SubSection(title="输入输出处理", description="数据处理"),
             ],
-            "使用示例": [
-                SubSection(title="基础示例", description="基本使用示例"),
-                SubSection(title="进阶示例", description="高级使用场景"),
+            "内置算子参考": [
+                SubSection(title="文本分块算子", description="文本分块相关算子"),
+                SubSection(title="文本嵌入算子", description="文本嵌入相关算子"),
+                SubSection(title="图像处理算子", description="图像处理相关算子"),
+                SubSection(title="音频处理算子", description="音频处理相关算子"),
+                SubSection(title="连接器算子", description="数据连接器算子"),
             ],
-        }
-
-        developer_manual_defaults = {
-            "架构设计": [
-                SubSection(title="整体架构", description="系统架构图和说明"),
-                SubSection(title="模块职责划分", description="各模块职责"),
-                SubSection(title="类继承关系图", description="类的继承关系"),
-            ],
-            "核心接口定义": [
-                SubSection(title="BaseOperator", description="基础算子接口"),
-                SubSection(title="MapperOperator", description="映射算子接口"),
-            ],
-            "开发自定义算子": [
+            "自定义算子开发": [
+                SubSection(title="开发流程概述", description="整体开发流程"),
                 SubSection(title="开发自定义 Mapper", description="如何开发映射算子"),
-                SubSection(title="开发自定义 Filter", description="如何开发过滤算子"),
+                SubSection(title="开发自定义 Connector", description="如何开发连接器"),
+                SubSection(title="开发底层 Function", description="如何开发底层功能"),
+                SubSection(title="注册与使用自定义算子", description="注册和使用流程"),
             ],
-            "API 参考": [
-                SubSection(title="核心类", description="主要的类和接口"),
+            "常见问题": [
+                SubSection(title="安装问题", description="安装相关问题"),
+                SubSection(title="配置问题", description="配置相关问题"),
+                SubSection(title="使用问题", description="使用相关问题"),
             ],
-        }
-
-        if self.doc_type == "user_manual":
-            return user_manual_defaults.get(
-                chapter_title, [SubSection(title="概述", description="章节概述")]
-            )
-        elif self.doc_type == "developer_manual":
-            return developer_manual_defaults.get(
-                chapter_title, [SubSection(title="概述", description="章节概述")]
-            )
-
-        defaults = {
             "项目简介": [
                 SubSection(title="项目背景", description="项目解决什么问题"),
                 SubSection(title="核心特性", description="项目的主要特性"),
-            ],
-            "架构设计": [
-                SubSection(title="整体架构", description="系统架构图和说明"),
-                SubSection(title="核心模块", description="主要模块划分"),
             ],
             "安装指南": [
                 SubSection(title="环境要求", description="Python版本、依赖等"),

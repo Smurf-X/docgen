@@ -19,9 +19,7 @@ from .outline import (
     Outline,
     DEFAULT_CHAPTERS,
     OPERATOR_CHAPTERS,
-    DocType,
     get_default_chapters,
-    get_default_chapters_by_doc_type,
     get_outline_from_overview_prompt,
     Chapter,
     SubSection,
@@ -57,14 +55,6 @@ console = Console(force_terminal=True)
 @click.option(
     "--structure", "-s", is_flag=True, help="启用结构注入模式，先推断项目结构再生成文档"
 )
-@click.option(
-    "--type",
-    "-t",
-    "doc_type",
-    type=click.Choice(["user_manual", "developer_manual"]),
-    default=None,
-    help="文档类型: user_manual (用户手册) 或 developer_manual (开发接口手册)",
-)
 def main(
     project_path: str,
     config_path: str,
@@ -73,7 +63,6 @@ def main(
     yes: bool,
     explore: bool,
     structure: bool,
-    doc_type: Optional[str],
 ):
     """DocGen - 交互式文档生成工具
 
@@ -87,9 +76,6 @@ def main(
 
     if output_path:
         config.output.path = output_path
-
-    if doc_type:
-        config.doc.doc_type = doc_type  # type: ignore
 
     asyncio.run(
         run_generation(project_path, config, config_path, yes, explore, structure)
@@ -256,13 +242,7 @@ async def run_generation(
         step_num = "5/7" if enable_explore or enable_structure else "4/7"
         console.print(f"\n[bold]步骤 {step_num}: 确认章节[/]")
 
-        doc_type = config.doc.doc_type
-        if doc_type in ["user_manual", "developer_manual"]:
-            default_chapters = get_default_chapters_by_doc_type(doc_type)
-            doc_type_name = "用户手册" if doc_type == "user_manual" else "开发接口手册"
-            console.print(f"[cyan]文档类型: {doc_type_name}[/]")
-        else:
-            default_chapters = get_default_chapters(project_type)
+        default_chapters = get_default_chapters(project_type)
 
         console.print("默认章节：")
         for i, chapter in enumerate(default_chapters, 1):

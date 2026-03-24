@@ -1,7 +1,7 @@
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Optional, Literal
+from typing import Optional
 import yaml
 
 
@@ -55,14 +55,6 @@ class InferenceRulesConfig:
     project_type: str = ""
 
 
-DocType = Literal["user_manual", "developer_manual"]
-
-
-@dataclass
-class DocConfig:
-    doc_type: DocType = "user_manual"
-
-
 @dataclass
 class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
@@ -70,7 +62,6 @@ class Config:
     scan: ScanConfig = field(default_factory=ScanConfig)
     customization: CustomizationConfig = field(default_factory=CustomizationConfig)
     inference_rules: InferenceRulesConfig = field(default_factory=InferenceRulesConfig)
-    doc: DocConfig = field(default_factory=DocConfig)
 
     @classmethod
     def load(cls, path: str) -> "Config":
@@ -147,15 +138,6 @@ class Config:
                     k: v
                     for k, v in data["inference_rules"].items()
                     if k in InferenceRulesConfig.__dataclass_fields__
-                }
-            )
-
-        if "doc" in data:
-            config.doc = DocConfig(
-                **{
-                    k: v
-                    for k, v in data["doc"].items()
-                    if k in DocConfig.__dataclass_fields__
                 }
             )
 
