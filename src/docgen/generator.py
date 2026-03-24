@@ -101,24 +101,15 @@ class Generator:
         for op in operators:
             by_category[op.category].append(op)
 
-        category_order = [
-            "text",
-            "audio",
-            "image",
-            "video",
-            "datasource",
-            "datasink",
-            "other",
-        ]
-        subsections = []
+        processing_categories = ["text", "audio", "image", "video"]
+        storage_categories = ["datasource", "datasink"]
 
-        for category in category_order:
+        processing_children = []
+        for category in processing_categories:
             if category not in by_category:
                 continue
-
             ops = by_category[category]
             category_name = ops[0].category_display if ops else category
-
             operators_data = [
                 {
                     "register_name": op.register_name,
@@ -128,12 +119,52 @@ class Generator:
                 }
                 for op in ops
             ]
-
-            subsections.append(
+            processing_children.append(
                 SubSection(
                     title=category_name,
                     description=f"{category_name}，共 {len(ops)} 个算子",
                     operators=operators_data,
+                )
+            )
+
+        storage_children = []
+        for category in storage_categories:
+            if category not in by_category:
+                continue
+            ops = by_category[category]
+            category_name = ops[0].category_display if ops else category
+            operators_data = [
+                {
+                    "register_name": op.register_name,
+                    "class_name": op.class_name,
+                    "module_path": op.module_path,
+                    "file_path": op.file_path,
+                }
+                for op in ops
+            ]
+            storage_children.append(
+                SubSection(
+                    title=category_name,
+                    description=f"{category_name}，共 {len(ops)} 个算子",
+                    operators=operators_data,
+                )
+            )
+
+        subsections = []
+        if processing_children:
+            subsections.append(
+                SubSection(
+                    title="多模态数据处理算子",
+                    description="文本、音频、图像、视频等模态的数据处理算子",
+                    children=processing_children,
+                )
+            )
+        if storage_children:
+            subsections.append(
+                SubSection(
+                    title="数据存储与落盘",
+                    description="数据读取和写入相关算子",
+                    children=storage_children,
                 )
             )
 

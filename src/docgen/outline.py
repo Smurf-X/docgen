@@ -42,6 +42,7 @@ class SubSection:
     module_path: str = ""
     class_name: str = ""
     operators: list = field(default_factory=list)
+    children: list["SubSection"] = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -50,16 +51,19 @@ class SubSection:
             "module_path": self.module_path,
             "class_name": self.class_name,
             "operators": self.operators,
+            "children": [c.to_dict() for c in self.children],
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "SubSection":
+        children = [cls.from_dict(c) for c in data.get("children", [])]
         return cls(
             title=data.get("title", ""),
             description=data.get("description", ""),
             module_path=data.get("module_path", ""),
             class_name=data.get("class_name", ""),
             operators=data.get("operators", []),
+            children=children,
         )
 
 
@@ -87,10 +91,19 @@ class Outline:
             lines.append(f"{i}. {chapter.title}")
             for j, sub in enumerate(chapter.subsections, 1):
                 lines.append(f"   {i}.{j} {sub.title}")
+                for k, child in enumerate(sub.children, 1):
+                    lines.append(f"      {i}.{j}.{k} {child.title}")
         return "\n".join(lines)
 
     def count_subsections(self) -> int:
-        return sum(len(c.subsections) for c in self.chapters)
+        count = 0
+        for chapter in self.chapters:
+            for sub in chapter.subsections:
+                if sub.children:
+                    count += len(sub.children)
+                else:
+                    count += 1
+        return count
 
     @classmethod
     def from_chapter_titles(cls, titles: list[str]) -> "Outline":

@@ -354,29 +354,61 @@ async def run_generation(
                 continue
 
             chapter_content_parts = []
-            subsection_titles = []
 
-            for subsection in chapter.subsections:
-                progress.update(
-                    task, description=f"生成: {chapter.title} - {subsection.title}"
-                )
+            for sub_idx, subsection in enumerate(chapter.subsections, 1):
+                if subsection.children:
+                    sub_content_parts = []
+                    sub_content_parts.append(
+                        f"## {subsection.title}\n\n{subsection.description}\n"
+                    )
 
-                try:
-                    if context_builder:
-                        content = await generator.generate_content_with_context(
-                            chapter, subsection, project_info_str
+                    for child_idx, child in enumerate(subsection.children, 1):
+                        progress.update(
+                            task,
+                            description=f"生成: {chapter.title} - {subsection.title} - {child.title}",
                         )
-                    else:
-                        content = await generator.generate_content(
-                            chapter, subsection, project_info_str
-                        )
-                    chapter_content_parts.append(f"## {subsection.title}\n\n{content}")
-                    subsection_titles.append(subsection.title)
-                except Exception as e:
-                    console.print(f"[red]✗ {subsection.title}: {e}[/]")
-                    chapter_content_parts.append(f"## {subsection.title}\n\n*生成失败*")
 
-                progress.advance(task)
+                        try:
+                            if context_builder:
+                                content = await generator.generate_content_with_context(
+                                    chapter, child, project_info_str
+                                )
+                            else:
+                                content = await generator.generate_content(
+                                    chapter, child, project_info_str
+                                )
+                            sub_content_parts.append(f"### {child.title}\n\n{content}")
+                        except Exception as e:
+                            console.print(f"[red]✗ {child.title}: {e}[/]")
+                            sub_content_parts.append(f"### {child.title}\n\n*生成失败*")
+
+                        progress.advance(task)
+
+                    chapter_content_parts.append("\n\n".join(sub_content_parts))
+                else:
+                    progress.update(
+                        task, description=f"生成: {chapter.title} - {subsection.title}"
+                    )
+
+                    try:
+                        if context_builder:
+                            content = await generator.generate_content_with_context(
+                                chapter, subsection, project_info_str
+                            )
+                        else:
+                            content = await generator.generate_content(
+                                chapter, subsection, project_info_str
+                            )
+                        chapter_content_parts.append(
+                            f"## {subsection.title}\n\n{content}"
+                        )
+                    except Exception as e:
+                        console.print(f"[red]✗ {subsection.title}: {e}[/]")
+                        chapter_content_parts.append(
+                            f"## {subsection.title}\n\n*生成失败*"
+                        )
+
+                    progress.advance(task)
 
             if chapter_content_parts:
                 full_content = "\n\n---\n\n".join(chapter_content_parts)
@@ -392,7 +424,15 @@ async def run_generation(
         if c.title == "算子参考" and op_categories:
             sections_for_index.append((i, c.title, [cat.name for cat in op_categories]))
         else:
-            sections_for_index.append((i, c.title, [s.title for s in c.subsections]))
+            subsection_titles = []
+            for s in c.subsections:
+                if s.children:
+                    subsection_titles.append(s.title)
+                    for child in s.children:
+                        pass
+                else:
+                    subsection_titles.append(s.title)
+            sections_for_index.append((i, c.title, subsection_titles))
 
     index_path = writer.write_index(sections_for_index)
     console.print(f"[green]✓[/] {index_path}")
