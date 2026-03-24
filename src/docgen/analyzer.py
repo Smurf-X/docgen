@@ -1,5 +1,6 @@
 import ast
 import inspect
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 from pathlib import Path
@@ -372,3 +373,128 @@ class CodeAnalyzer:
                     result.append((module_path, info.name, func))
 
         return result
+
+    def scan_registered_operators(self) -> list["RegisteredOperator"]:
+        """
+        扫描所有已注册的算子
+
+        通过静态分析 @register_operator("xxx") 装饰器找到所有注册的算子
+
+        :return: 注册的算子列表
+        """
+        operators = []
+        py_files = list(self.project_path.rglob("*.py"))
+
+        for py_file in py_files:
+            try:
+                rel_path = py_file.relative_to(self.project_path)
+                module_path = (
+                    str(rel_path.with_suffix("")).replace(os.sep, ".").replace("/", ".")
+                )
+
+                if module_path.startswith("docs.") or module_path.startswith("test"):
+                    continue
+
+                with open(py_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+
+                tree = ast.parse(content)
+
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ClassDef):
+                        for decorator in node.decorator_list:
+                            register_name = self._extract_register_name(decorator)
+                            if register_name:
+                                class_info = self._parse_class(node)
+                                operators.append(
+                                    RegisteredOperator(
+                                        register_name=register_name,
+                                        class_name=node.name,
+                                        module_path=module_path,
+                                        file_path=str(rel_path),
+                                        class_info=class_info,
+                                    )
+                                )
+            except Exception:
+                pass
+
+        return operators
+
+    def _extract_register_name(self, decorator) -> Optional[str]:
+        """
+        从装饰器中提取注册名称
+
+        支持:
+        - @register_operator("xxx")
+        - @OperatorRegistry.register("xxx")
+        """
+        if isinstance(decorator, ast.Call):
+            func = decorator.func
+
+            if isinstance(func, ast.Name) and func.id == "register_operator":
+                if decorator.args and isinstance(decorator.args[0], ast.Constant):
+                    value = decorator.args[0].value
+                    if isinstance(value, str):
+                        return value
+
+            if isinstance(func, ast.Attribute) and func.attr == "register":
+                if (
+                    isinstance(func.value, ast.Name)
+                    and func.value.id == "OperatorRegistry"
+                ):
+                    if decorator.args and isinstance(decorator.args[0], ast.Constant):
+                        value = decorator.args[0].value
+                        if isinstance(value, str):
+                            return value
+
+        return None
+
+
+@dataclass
+class RegisteredOperator:
+    """已注册的算子信息"""
+
+    register_name: str
+    class_name: str
+    module_path: str
+    file_path: str
+    class_info: ClassInfo
+
+    @property
+    def category(self) -> str:
+        """
+        算子分类
+
+        :return: 'text', 'audio', 'video', 'datasource', 'datasink', 'other'
+        """
+        name_lower = self.register_name.lower()
+
+        if "_reader" in name_lower:
+            return "datasource"
+        if "_writer" in name_lower:
+            return "datasink"
+
+        if name_lower.startswith("text_"):
+            return "text"
+        if name_lower.startswith("audio_"):
+            return "audio"
+        if name_lower.startswith("video_"):
+            return "video"
+        if name_lower.startswith("image_"):
+            return "image"
+
+        return "other"
+
+    @property
+    def category_display(self) -> str:
+        """分类显示名称"""
+        category_map = {
+            "text": "文本处理算子",
+            "audio": "音频处理算子",
+            "video": "视频处理算子",
+            "image": "图像处理算子",
+            "datasource": "DataSource",
+            "datasink": "DataSink",
+            "other": "其他算子",
+        }
+        return category_map.get(self.category, "其他算子")

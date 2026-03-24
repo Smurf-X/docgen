@@ -93,63 +93,147 @@ class Generator:
             return self._get_default_subsections(chapter.title)
 
     def _generate_api_subsections(self) -> list[SubSection]:
-        subsections = []
-        seen_classes = set()
+        operators = self.analyzer.scan_registered_operators()
 
-        py_files = list(self.scanner.project_path.rglob("*.py"))
-        py_files = [
-            f
-            for f in py_files
-            if not any(p.startswith(".") or p.startswith("__") for p in f.parts)
+        from collections import defaultdict
+
+        by_category = defaultdict(list)
+        for op in operators:
+            by_category[op.category].append(op)
+
+        category_order = [
+            "text",
+            "audio",
+            "image",
+            "video",
+            "datasource",
+            "datasink",
+            "other",
         ]
-        py_files = [f for f in py_files if "test" not in str(f).lower()]
+        subsections = []
 
-        for py_file in py_files[:20]:
-            try:
-                rel_path = py_file.relative_to(self.scanner.project_path)
-                module_path = (
-                    str(rel_path.with_suffix("")).replace("\\", ".").replace("/", ".")
+        for category in category_order:
+            if category not in by_category:
+                continue
+
+            ops = by_category[category]
+            category_name = ops[0].category_display if ops else category
+
+            operators_data = [
+                {
+                    "register_name": op.register_name,
+                    "class_name": op.class_name,
+                    "module_path": op.module_path,
+                    "file_path": op.file_path,
+                }
+                for op in ops
+            ]
+
+            subsections.append(
+                SubSection(
+                    title=category_name,
+                    description=f"{category_name}，共 {len(ops)} 个算子",
+                    operators=operators_data,
                 )
-
-                if module_path.startswith("docs.") or module_path.startswith("test"):
-                    continue
-
-                info = self.analyzer.analyze_file(str(rel_path))
-                if info and info.classes:
-                    for cls in info.classes[:3]:
-                        if cls.name not in seen_classes:
-                            seen_classes.add(cls.name)
-                            desc = (
-                                cls.docstring.split("\n")[0]
-                                if cls.docstring
-                                else f"{cls.name} 类"
-                            )
-                            subsections.append(
-                                SubSection(
-                                    title=cls.name,
-                                    description=desc[:100],
-                                    module_path=module_path,
-                                    class_name=cls.name,
-                                )
-                            )
-            except Exception:
-                pass
+            )
 
         if not subsections:
             subsections.append(
                 SubSection(
-                    title="核心类",
-                    description="项目核心类",
-                    module_path="",
-                    class_name="",
+                    title="核心算子",
+                    description="项目核心算子",
                 )
             )
 
-        return subsections[:15]
+        return subsections
+
+    async def generate_operator_content(
+        self, operator_info: dict, project_info_str: str
+    ) -> str:
+        """
+        为单个算子生成文档（调用 LLM）
+
+        :param operator_info: 算子信息，包含 register_name, class_name, module_path, file_path
+        :param project_info_str: 项目信息
+        :return: 生成的文档内容
+        """
+        module_path = operator_info["module_path"]
+        class_name = operator_info["class_name"]
+        register_name = operator_info["register_name"]
+        file_path = operator_info["file_path"]
+
+        operators = self.analyzer.scan_registered_operators()
+        op = next((o for o in operators if o.register_name == register_name), None)
+
+        code_context = ""
+        if op and op.class_info:
+            cls = op.class_info
+            code_context = f"## 算子代码信息\n\n"
+            code_context += f"**类名**: {cls.name}\n"
+            code_context += f"**注册名称**: {register_name}\n\n"
+
+            if cls.bases:
+                code_context += f"**继承自**: {', '.join(cls.bases)}\n\n"
+
+            if cls.docstring:
+                code_context += f"**类说明**:\n{cls.docstring.strip()}\n\n"
+
+            if cls.methods:
+                code_context += "**方法**:\n"
+                for method in cls.methods[:8]:
+                    params_str = ", ".join(str(p) for p in method.parameters[:5])
+                    method_sig = f"- `{method.name}({params_str})`"
+                    if method.return_type:
+                        method_sig += f" -> {method.return_type}"
+                    code_context += method_sig + "\n"
+                    if method.docstring:
+                        code_context += f"  {method.docstring[:150]}\n"
+                code_context += "\n"
+
+        full_file_path = self.scanner.project_path / file_path
+        if full_file_path.exists():
+            try:
+                with open(full_file_path, "r", encoding="utf-8") as f:
+                    file_content = f.read()
+                code_context += f"**完整代码**:\n```python\n{file_content}\n```\n"
+            except Exception:
+                pass
+
+        prompt = f"""你是一个技术文档专家。请为以下算子撰写用户手册文档。
+
+{code_context}
+
+## 项目信息
+
+{project_info_str}
+
+## 写作要求
+
+1. 用中文撰写，语言简洁清晰
+2. 重点介绍用户需要知道的内容：如何使用、参数说明、使用示例
+3. 不要介绍继承关系、基类实现等开发细节
+4. 提供 YAML 配置示例
+5. 使用 Markdown 格式
+
+## 输出格式
+
+直接输出文档内容，不要包含标题（标题会自动添加）。
+"""
+
+        return await self._call_llm(prompt)
 
     async def generate_content(
         self, chapter: Chapter, subsection: SubSection, project_info_str: str
     ) -> str:
+        if subsection.operators:
+            parts = []
+            for op_info in subsection.operators:
+                content = await self.generate_operator_content(
+                    op_info, project_info_str
+                )
+                parts.append(content)
+            return "\n\n---\n\n".join(parts)
+
         api_info = ""
 
         if self.explorer:

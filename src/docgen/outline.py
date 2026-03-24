@@ -41,6 +41,7 @@ class SubSection:
     description: str = ""
     module_path: str = ""
     class_name: str = ""
+    operators: list = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -48,6 +49,7 @@ class SubSection:
             "description": self.description,
             "module_path": self.module_path,
             "class_name": self.class_name,
+            "operators": self.operators,
         }
 
     @classmethod
@@ -57,6 +59,7 @@ class SubSection:
             description=data.get("description", ""),
             module_path=data.get("module_path", ""),
             class_name=data.get("class_name", ""),
+            operators=data.get("operators", []),
         )
 
 
