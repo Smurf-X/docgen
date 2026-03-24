@@ -236,26 +236,29 @@ CONTENT_PROMPT_TEMPLATE = """你是一个技术文档专家。请为以下项目
 
 
 def get_subsection_prompt(
-    chapter_title: str, 
-    project_info: str, 
+    chapter_title: str,
+    project_info: str,
     extra_context: str = "",
-    custom_style: str = ""
+    custom_style: str = "",
 ) -> str:
     chapter_context = CHAPTER_PROMPTS.get(chapter_title, "")
     full_context = (
         f"{chapter_context}\n\n{extra_context}" if extra_context else chapter_context
     )
-    
+
     # 添加自定义风格指南
     style_section = ""
     if custom_style:
         style_section = f"\n\n用户自定义风格要求:\n{custom_style}"
-    
-    return SUBSECTION_PROMPT_TEMPLATE.format(
-        chapter_title=chapter_title,
-        project_info=project_info,
-        extra_context=full_context,
-    ) + style_section
+
+    return (
+        SUBSECTION_PROMPT_TEMPLATE.format(
+            chapter_title=chapter_title,
+            project_info=project_info,
+            extra_context=full_context,
+        )
+        + style_section
+    )
 
 
 def get_content_prompt(
@@ -264,7 +267,7 @@ def get_content_prompt(
     subsection_description: str,
     project_info: str,
     api_info: str = "",
-    custom_style: str = ""
+    custom_style: str = "",
 ) -> str:
     base_prompt = CONTENT_PROMPT_TEMPLATE.format(
         subsection_title=subsection_title,
@@ -273,11 +276,11 @@ def get_content_prompt(
         project_info=project_info,
         api_info=api_info if api_info else "（无额外API信息）",
     )
-    
+
     # 添加自定义风格指南
     if custom_style:
         base_prompt += f"\n\n用户自定义风格要求:\n{custom_style}"
-    
+
     return base_prompt
 
 
@@ -318,11 +321,58 @@ OUTLINE_FROM_OVERVIEW_PROMPT = """你是一个技术文档专家。请根据以�
 """
 
 
-def get_outline_from_overview_prompt(overview_content: str, custom_style: str = "") -> str:
+def get_outline_from_overview_prompt(
+    overview_content: str, custom_style: str = ""
+) -> str:
     """生成基于项目全貌的文档目录 prompt"""
     prompt = OUTLINE_FROM_OVERVIEW_PROMPT.format(overview_content=overview_content)
-    
+
     if custom_style:
         prompt += f"\n\n用户自定义风格要求:\n{custom_style}"
-    
+
     return prompt
+
+
+CONTENT_PROMPT_WITH_CONTEXT = """你正在为项目 "{project_name}" 撰写文档的 "{subsection_title}" 部分。
+
+{context_info}
+
+## 项目基本信息
+
+{project_info}
+
+## 写作要求
+
+1. 用中文撰写，语言简洁清晰
+2. 内容要完整、准确、实用
+3. 使用Markdown格式
+4. 只使用上面提供的信息，不要编造不存在的API或功能
+5. 代码示例必须使用真实存在的类和方法
+
+重要格式要求：
+- 【禁止】在开头输出任何标题，标题会由系统自动添加
+- 直接开始写内容
+
+请输出内容：
+"""
+
+
+def get_content_prompt_with_context(
+    project_name: str,
+    subsection_title: str,
+    project_info: str,
+    context_info: str,
+    custom_style: str = "",
+) -> str:
+    """生成带有结构上下文的内容 prompt"""
+    base_prompt = CONTENT_PROMPT_WITH_CONTEXT.format(
+        project_name=project_name,
+        subsection_title=subsection_title,
+        project_info=project_info,
+        context_info=context_info,
+    )
+
+    if custom_style:
+        base_prompt += f"\n\n用户自定义风格要求:\n{custom_style}"
+
+    return base_prompt

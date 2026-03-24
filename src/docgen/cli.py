@@ -16,9 +16,9 @@ from .config import Config
 from .scanner import Scanner, ProjectInfo
 from .analyzer import CodeAnalyzer
 from .outline import (
-    Outline, 
-    DEFAULT_CHAPTERS, 
-    OPERATOR_CHAPTERS, 
+    Outline,
+    DEFAULT_CHAPTERS,
+    OPERATOR_CHAPTERS,
     get_default_chapters,
     get_outline_from_overview_prompt,
     Chapter,
@@ -28,6 +28,8 @@ from .generator import Generator
 from .writer import Writer
 from .op_analyzer import OperatorAnalyzer
 from .explorer import Explorer
+from .structure_inferrer import StructureInferrer
+from .context_builder import ContextBuilder
 
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -44,7 +46,15 @@ console = Console(force_terminal=True)
 @click.option("--output", "-o", "output_path", help="输出目录")
 @click.option("--version", "-v", is_flag=True, help="显示版本")
 @click.option("--yes", "-y", is_flag=True, help="跳过交互确认，直接生成")
-@click.option("--explore", "-e", is_flag=True, help="启用项目探索模式，自动分析项目结构生成更精准的文档目录")
+@click.option(
+    "--explore",
+    "-e",
+    is_flag=True,
+    help="启用项目探索模式，自动分析项目结构生成更精准的文档目录",
+)
+@click.option(
+    "--structure", "-s", is_flag=True, help="启用结构注入模式，先推断项目结构再生成文档"
+)
 def main(
     project_path: str,
     config_path: str,
@@ -52,6 +62,7 @@ def main(
     version: bool,
     yes: bool,
     explore: bool,
+    structure: bool,
 ):
     """DocGen - 交互式文档生成工具
 
@@ -66,10 +77,19 @@ def main(
     if output_path:
         config.output.path = output_path
 
-    asyncio.run(run_generation(project_path, config, config_path, yes, explore))
+    asyncio.run(
+        run_generation(project_path, config, config_path, yes, explore, structure)
+    )
 
 
-async def run_generation(project_path: str, config: Config, config_path: str, auto_confirm: bool, enable_explore: bool):
+async def run_generation(
+    project_path: str,
+    config: Config,
+    config_path: str,
+    auto_confirm: bool,
+    enable_explore: bool,
+    enable_structure: bool,
+):
     console.print(
         Panel.fit(
             f"[bold cyan]DocGen[/] - 文档生成工具\n版本: {__version__}",
@@ -101,7 +121,7 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
 
     # 初始化 generator
     generator = Generator(config, scanner, analyzer)
-    
+
     # 检查 LLM 连通性
     console.print("\n[cyan]正在检查 LLM 连接...[/]")
     is_connected, message = await generator.check_connection()
@@ -111,7 +131,7 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
         console.print(f"[red]✗ LLM 连接失败: {message}[/]")
         console.print("[yellow]请检查配置文件中的 api_base、api_key 和 model 设置[/]")
         return
-    
+
     # 加载自定义风格指南
     style_content, extra_content = config.load_customization_content(config_path)
     if style_content:
@@ -120,40 +140,94 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
     if extra_content:
         console.print("[cyan]已加载额外上下文[/]")
 
-    # 项目探索模式
+    project_structure = None
+    context_builder = None
+
+    if enable_structure:
+        console.print("\n[bold]步骤 2/7: 推断项目结构[/]")
+        console.print("[cyan]正在推断项目结构...[/]")
+
+        inferrer = StructureInferrer(scanner, config)
+        project_structure = inferrer.infer()
+
+        console.print(f"\n[green]项目类型: {project_structure.type}[/]")
+        console.print(f"\n[cyan]推断的项目结构:[/]")
+        console.print(inferrer.format_structure_tree(project_structure))
+
+        if project_structure.relations:
+            console.print(f"\n[cyan]推断的模块关系:[/]")
+            console.print(inferrer.format_relations(project_structure.relations))
+
+        if not auto_confirm:
+            console.print("\n[cyan]是否确认此结构？[/]")
+            console.print("  [Y] 确认，继续生成文档")
+            console.print("  [n] 不正确，让我手动编辑")
+            console.print("  [e] 编辑描述信息")
+            confirm = input("选择: ").strip().lower()
+
+            if confirm == "n":
+                console.print("[yellow]请编辑生成的 project.yaml 文件后重新运行[/]")
+                docgen_dir = Path(project_path) / ".docgen"
+                docgen_dir.mkdir(exist_ok=True)
+                project_yaml_path = docgen_dir / "project.yaml"
+                project_yaml_path.write_text(
+                    project_structure.to_yaml(), encoding="utf-8"
+                )
+                console.print(f"[cyan]已生成: {project_yaml_path}[/]")
+                return
+            elif confirm == "e":
+                docgen_dir = Path(project_path) / ".docgen"
+                docgen_dir.mkdir(exist_ok=True)
+                project_yaml_path = docgen_dir / "project.yaml"
+                project_yaml_path.write_text(
+                    project_structure.to_yaml(), encoding="utf-8"
+                )
+                console.print(f"[cyan]已生成: {project_yaml_path}[/]")
+                console.print("[yellow]请编辑后重新运行[/]")
+                return
+
+        context_builder = ContextBuilder(project_structure, analyzer)
+        generator.set_context_builder(context_builder)
+        generator.set_project_name(project_structure.name)
+
+        if project_structure.type != "unknown":
+            project_type = project_structure.type
+
     overview = None
     explorer = None
     outline = None
     if enable_explore:
-        console.print("\n[bold]步骤 2/6: 项目探索分析[/]")
+        console.print("\n[bold]步骤 3/7: 项目探索分析[/]")
         console.print("[cyan]正在分析项目结构...[/]")
-        
+
         explorer = Explorer(config, scanner)
-        
+
         # 使用批量分类方式探索（针对差 LLM 优化）
         overview = await explorer.explore_with_classification()
-        
+
         # 将 explorer 传递给 generator
         generator.set_explorer(explorer)
-        
+
         # 显示探索结果
         console.print(f"\n[green]项目类型: {overview.project_type}[/]")
         console.print(f"[green]项目概述: {overview.summary}[/]")
-        
+
         if overview.core_modules:
             console.print("\n[cyan]核心模块:[/]")
             for module in overview.core_modules[:5]:
-                classes_str = ", ".join(module.get('classes', [])[:3])
-                console.print(f"  - {module['path']}: {module['summary']} ({classes_str}...)")
-        
+                classes_str = ", ".join(module.get("classes", [])[:3])
+                console.print(
+                    f"  - {module['path']}: {module['summary']} ({classes_str}...)"
+                )
+
         # 更新项目类型
         if overview.project_type != "general":
             project_type = overview.project_type
-        
+
         # 直接从分类结果生成目录（不需要额外 LLM 调用）
-        console.print(f"\n[bold]步骤 3/6: 生成文档目录[/]")
+        console.print(f"\n[bold]步骤 4/7: 生成文档目录[/]")
         console.print("[cyan]基于分类结果生成文档目录...[/]")
-        
+
         classifications = explorer.get_classifications()
         if classifications:
             outline = explorer.generate_outline_from_classification(classifications)
@@ -162,11 +236,12 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
             console.print(outline.display())
         else:
             outline = None
-    
+
     # 如果探索模式没有生成目录，使用默认方式
     if not outline:
-        console.print(f"\n[bold]步骤 {'3/6' if enable_explore else '2/5'}: 确认章节[/]")
-        
+        step_num = "5/7" if enable_explore or enable_structure else "4/7"
+        console.print(f"\n[bold]步骤 {step_num}: 确认章节[/]")
+
         # 使用默认章节
         default_chapters = get_default_chapters(project_type)
 
@@ -188,10 +263,10 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
             chapters = default_chapters.copy()
 
         outline = Outline.from_chapter_titles(chapters)
-    
+
     console.print(f"\n[green]已选择 {len(outline.chapters)} 个章节[/]")
 
-    console.print(f"\n[bold]步骤 {'4/6' if enable_explore else '3/5'}: 生成子章节[/]")
+    console.print(f"\n[bold]步骤 6/7: 生成子章节[/]")
 
     project_info_str = project_info.to_summary()
     op_categories = []
@@ -211,7 +286,7 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
                     description=f"✓ 算子参考: {len(op_categories)} 类, {total_ops} 个算子",
                 )
                 continue
-            
+
             # 如果子章节已经生成（探索模式），跳过
             if chapter.subsections:
                 continue
@@ -244,7 +319,7 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
             console.print("[yellow]已取消[/]")
             return
 
-    console.print(f"\n[bold]步骤 {'5/6' if enable_explore else '4/5'}: 生成文档内容[/]")
+    console.print(f"\n[bold]步骤 7/7: 生成文档内容[/]")
 
     writer = Writer(config.output.path, project_info.name)
     total_subsections = outline.count_subsections()
@@ -288,9 +363,14 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
                 )
 
                 try:
-                    content = await generator.generate_content(
-                        chapter, subsection, project_info_str
-                    )
+                    if context_builder:
+                        content = await generator.generate_content_with_context(
+                            chapter, subsection, project_info_str
+                        )
+                    else:
+                        content = await generator.generate_content(
+                            chapter, subsection, project_info_str
+                        )
                     chapter_content_parts.append(f"## {subsection.title}\n\n{content}")
                     subsection_titles.append(subsection.title)
                 except Exception as e:
@@ -306,7 +386,7 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
                 )
                 console.print(f"[green]✓[/] {file_path}")
 
-    console.print(f"\n[bold]步骤 {'6/6' if enable_explore else '5/5'}: 生成索引[/]")
+    console.print(f"\n[bold]步骤 8/8: 生成索引[/]")
 
     sections_for_index = []
     for i, c in enumerate(outline.chapters, 1):
@@ -331,30 +411,32 @@ async def run_generation(project_path: str, config: Config, config_path: str, au
     )
 
 
-async def generate_outline_from_overview(generator: Generator, overview, custom_style: str = "") -> Optional[Outline]:
+async def generate_outline_from_overview(
+    generator: Generator, overview, custom_style: str = ""
+) -> Optional[Outline]:
     """基于项目全貌生成文档目录"""
     from .explorer import Explorer
-    
+
     explorer = Explorer(generator.config, generator.scanner)
     overview_content = explorer.format_overview_for_prompt(overview)
-    
+
     prompt = get_outline_from_overview_prompt(overview_content, custom_style)
-    
+
     try:
         if generator.config.llm.stream:
             response = await generator._call_llm_stream(prompt)
         else:
             response = await generator._call_llm_sync(prompt)
-        
+
         # 提取 JSON
         json_str = response.strip()
         if "```json" in json_str:
             json_str = json_str.split("```json")[1].split("```")[0]
         elif "```" in json_str:
             json_str = json_str.split("```")[1].split("```")[0]
-        
+
         data = json.loads(json_str.strip())
-        
+
         outline = Outline()
         for chapter_data in data.get("chapters", []):
             chapter = Chapter(
@@ -362,16 +444,18 @@ async def generate_outline_from_overview(generator: Generator, overview, custom_
                 description=chapter_data.get("description", ""),
             )
             for sub_data in chapter_data.get("subsections", []):
-                chapter.subsections.append(SubSection(
-                    title=sub_data.get("title", ""),
-                    description=sub_data.get("description", ""),
-                    module_path=sub_data.get("module_path", ""),
-                    class_name=sub_data.get("class_name", ""),
-                ))
+                chapter.subsections.append(
+                    SubSection(
+                        title=sub_data.get("title", ""),
+                        description=sub_data.get("description", ""),
+                        module_path=sub_data.get("module_path", ""),
+                        class_name=sub_data.get("class_name", ""),
+                    )
+                )
             outline.chapters.append(chapter)
-        
+
         return outline
-        
+
     except Exception as e:
         print(f"基于项目全貌生成目录失败: {e}")
         return None

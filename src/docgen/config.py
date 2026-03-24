@@ -12,9 +12,9 @@ class LLMConfig:
     model: str = "gpt-4o"
     temperature: float = 0.7
     max_tokens: int = 4096
-    timeout: float = 300.0      # 请求超时时间（秒）
-    max_retries: int = 3        # 最大重试次数
-    stream: bool = True         # 是否使用流式输出
+    timeout: float = 300.0  # 请求超时时间（秒）
+    max_retries: int = 3  # 最大重试次数
+    stream: bool = True  # 是否使用流式输出
 
 
 @dataclass
@@ -45,8 +45,18 @@ class ScanConfig:
 @dataclass
 class CustomizationConfig:
     """自定义文档风格配置"""
-    style_guide: str = ""  # 风格指南文件路径
-    extra_context: str = ""  # 额外上下文文件路径
+
+    style_guide: str = ""
+    extra_context: str = ""
+
+
+@dataclass
+class InferenceRulesConfig:
+    """推断规则配置"""
+
+    directory_types: dict = field(default_factory=dict)
+    module_relations: list = field(default_factory=list)
+    project_type: str = ""
 
 
 @dataclass
@@ -55,6 +65,7 @@ class Config:
     output: OutputConfig = field(default_factory=OutputConfig)
     scan: ScanConfig = field(default_factory=ScanConfig)
     customization: CustomizationConfig = field(default_factory=CustomizationConfig)
+    inference_rules: InferenceRulesConfig = field(default_factory=InferenceRulesConfig)
 
     @classmethod
     def load(cls, path: str) -> "Config":
@@ -125,14 +136,23 @@ class Config:
                 }
             )
 
+        if "inference_rules" in data:
+            config.inference_rules = InferenceRulesConfig(
+                **{
+                    k: v
+                    for k, v in data["inference_rules"].items()
+                    if k in InferenceRulesConfig.__dataclass_fields__
+                }
+            )
+
         return config
 
     def load_customization_content(self, base_dir: str = ".") -> tuple[str, str]:
         """加载自定义风格指南和额外上下文内容
-        
+
         Args:
             base_dir: 配置文件所在目录，用于解析相对路径
-            
+
         Returns:
             (style_guide_content, extra_context_content)
         """

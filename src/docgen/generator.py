@@ -1,5 +1,5 @@
 import json
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from openai import AsyncOpenAI
 
@@ -10,10 +10,14 @@ from .outline import (
     SubSection,
     get_subsection_prompt,
     get_content_prompt,
+    get_content_prompt_with_context,
     DEFAULT_CHAPTERS,
 )
 from .scanner import Scanner
 from .analyzer import CodeAnalyzer
+
+if TYPE_CHECKING:
+    from .context_builder import ContextBuilder, ChapterContext
 
 
 class Generator:
@@ -23,9 +27,10 @@ class Generator:
         self.analyzer = analyzer
         self.custom_style = ""
         self.extra_context = ""
-        self.explorer = None  # 智能探索器（可选）
-        
-        # 初始化 OpenAI 客户端
+        self.explorer = None
+        self.context_builder: Optional["ContextBuilder"] = None
+        self.project_name = ""
+
         self.client = AsyncOpenAI(
             base_url=config.llm.api_base,
             api_key=config.llm.api_key,
@@ -34,12 +39,17 @@ class Generator:
         )
 
     def set_explorer(self, explorer):
-        """设置智能探索器"""
         self.explorer = explorer
+
+    def set_context_builder(self, context_builder: "ContextBuilder"):
+        self.context_builder = context_builder
+
+    def set_project_name(self, name: str):
+        self.project_name = name
 
     async def check_connection(self) -> tuple[bool, str]:
         """检查 LLM API 连通性
-        
+
         Returns:
             (是否连通, 错误信息或模型名称)
         """
@@ -68,10 +78,14 @@ class Generator:
             modules = self.scanner._identify_core_modules()
             if modules:
                 extra_context = f"项目核心模块：{', '.join(modules[:15])}"
-        
+
         # 添加用户额外上下文
         if self.extra_context:
-            extra_context = f"{extra_context}\n\n{self.extra_context}" if extra_context else self.extra_context
+            extra_context = (
+                f"{extra_context}\n\n{self.extra_context}"
+                if extra_context
+                else self.extra_context
+            )
 
         prompt = get_subsection_prompt(
             chapter.title, project_info_str, extra_context, self.custom_style
@@ -105,7 +119,7 @@ class Generator:
                 formatted_info = self.explorer.format_code_info_for_prompt(code_info)
                 if formatted_info:
                     api_info = formatted_info
-        
+
         # 如果没有探索器或探索器没有找到，使用传统方式
         if not api_info and subsection.module_path:
             module_info = self.analyzer.get_api_summary([subsection.module_path])
@@ -156,6 +170,31 @@ class Generator:
 
         return await self._call_llm(prompt)
 
+    async def generate_content_with_context(
+        self, chapter: Chapter, subsection: SubSection, project_info_str: str
+    ) -> str:
+        if not self.context_builder:
+            return await self.generate_content(chapter, subsection, project_info_str)
+
+        context = self.context_builder.build(
+            chapter_title=chapter.title,
+            chapter_description=chapter.description,
+            module_path=subsection.module_path,
+            class_name=subsection.class_name,
+        )
+
+        context_info = context.format_for_prompt()
+
+        prompt = get_content_prompt_with_context(
+            project_name=self.project_name or self.scanner.project_path.name,
+            subsection_title=subsection.title,
+            project_info=project_info_str,
+            context_info=context_info,
+            custom_style=self.custom_style,
+        )
+
+        return await self._call_llm(prompt)
+
     async def _call_llm(self, prompt: str) -> str:
         """调用 LLM API（支持流式和非流式）"""
         if self.config.llm.stream:
@@ -172,12 +211,12 @@ class Generator:
             max_tokens=self.config.llm.max_tokens,
             stream=True,
         )
-        
+
         content = ""
         async for chunk in stream:
             if chunk.choices[0].delta.content:
                 content += chunk.choices[0].delta.content
-        
+
         return content
 
     async def _call_llm_sync(self, prompt: str) -> str:
@@ -188,7 +227,7 @@ class Generator:
             temperature=self.config.llm.temperature,
             max_tokens=self.config.llm.max_tokens,
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
 
     def _extract_json(self, text: str) -> str:
         text = text.strip()
