@@ -302,6 +302,8 @@ class CodeAnalyzer:
         return "..."
 
     def analyze_module(self, module_path: str) -> Optional[ModuleInfo]:
+        import os
+
         module_dir = self.project_path / module_path
 
         if module_dir.is_file() and module_dir.suffix == ".py":
@@ -309,6 +311,16 @@ class CodeAnalyzer:
 
         if module_dir.is_dir():
             init_file = module_dir / "__init__.py"
+            if init_file.exists():
+                return self.analyze_file(str(init_file.relative_to(self.project_path)))
+
+        module_file = self.project_path / (module_path.replace(".", os.sep) + ".py")
+        if module_file.exists() and module_file.is_file():
+            return self.analyze_file(str(module_file.relative_to(self.project_path)))
+
+        module_pkg = self.project_path / module_path.replace(".", os.sep)
+        if module_pkg.is_dir():
+            init_file = module_pkg / "__init__.py"
             if init_file.exists():
                 return self.analyze_file(str(init_file.relative_to(self.project_path)))
 

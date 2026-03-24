@@ -4,7 +4,9 @@
 根据章节类型和项目结构描述，组装精准的输入信息给LLM
 """
 
+import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 from .structure_inferrer import ProjectStructure, DirectoryInfo
@@ -12,38 +14,147 @@ from .analyzer import CodeAnalyzer
 
 
 CHAPTER_CONTEXT_RULES = {
-    "项目简介": {
+    "概述": {
+        "structure_depth": 2,
+        "need_relations": False,
+        "need_code": False,
+        "writing_hints": [
+            "介绍项目背景和目的",
+            "说明核心特性",
+            "概述适用场景",
+        ],
+    },
+    "安装与配置": {
         "structure_depth": 1,
         "need_relations": False,
         "need_code": False,
         "writing_hints": [
-            "介绍项目解决的问题",
-            "列出核心特性",
-            "说明项目适用场景",
+            "说明环境要求",
+            "给出安装步骤",
+            "提供配置示例",
         ],
     },
-    "核心概念": {
+    "快速入门": {
+        "structure_depth": 1,
+        "need_relations": False,
+        "need_code": True,
+        "writing_hints": [
+            "提供最简单的使用示例",
+            "展示基本用法流程",
+            "给出可运行的代码",
+        ],
+    },
+    "Pipeline 使用指南": {
         "structure_depth": 2,
         "need_relations": True,
+        "need_code": True,
+        "writing_hints": [
+            "说明如何使用 PipelineBuilder",
+            "提供 YAML 配置格式",
+            "展示算子编排方法",
+        ],
+    },
+    "内置算子使用": {
+        "structure_depth": 2,
+        "need_relations": True,
+        "need_code": True,
+        "writing_hints": [
+            "列出每个算子的参数",
+            "提供使用示例",
+            "说明返回值和注意事项",
+            "只介绍具体实现类，不介绍抽象基类",
+        ],
+    },
+    "使用示例": {
+        "structure_depth": 1,
+        "need_relations": False,
+        "need_code": True,
+        "writing_hints": [
+            "提供完整的使用场景",
+            "展示代码和配置",
+            "解释关键步骤",
+        ],
+    },
+    "常见问题": {
+        "structure_depth": 0,
+        "need_relations": False,
         "need_code": False,
         "writing_hints": [
-            "解释核心概念和术语",
-            "说明数据模型",
-            "描述处理流程",
+            "列出常见问题",
+            "提供解决方案",
         ],
     },
     "架构设计": {
         "structure_depth": 2,
         "need_relations": True,
+        "need_code": True,
+        "writing_hints": [
+            "说明整体架构",
+            "解释模块职责",
+            "展示类继承关系",
+        ],
+    },
+    "核心接口定义": {
+        "structure_depth": 2,
+        "need_relations": True,
+        "need_code": True,
+        "writing_hints": [
+            "列出抽象基类和接口",
+            "说明抽象方法",
+            "展示继承关系",
+        ],
+    },
+    "开发自定义算子": {
+        "structure_depth": 2,
+        "need_relations": True,
+        "need_code": True,
+        "writing_hints": [
+            "说明如何扩展基类",
+            "提供开发示例",
+            "解释关键步骤",
+        ],
+    },
+    "注册机制": {
+        "structure_depth": 1,
+        "need_relations": False,
+        "need_code": True,
+        "writing_hints": [
+            "说明 OperatorRegistry 使用",
+            "展示算子注册方法",
+            "提供配置扩展示例",
+        ],
+    },
+    "API 参考": {
+        "structure_depth": 2,
+        "need_relations": True,
+        "need_code": True,
+        "writing_hints": [
+            "列出类和方法签名",
+            "说明参数和返回值",
+            "提供使用示例",
+        ],
+    },
+    "扩展开发最佳实践": {
+        "structure_depth": 1,
+        "need_relations": False,
+        "need_code": True,
+        "writing_hints": [
+            "说明代码规范",
+            "提供测试指南",
+            "解释贡献流程",
+        ],
+    },
+    "项目简介": {
+        "structure_depth": 2,
+        "need_relations": False,
         "need_code": False,
         "writing_hints": [
-            "描述系统整体架构",
-            "说明模块划分",
-            "展示数据流向",
+            "介绍项目背景",
+            "说明核心特性",
         ],
     },
     "安装指南": {
-        "structure_depth": 0,
+        "structure_depth": 1,
         "need_relations": False,
         "need_code": False,
         "writing_hints": [
@@ -72,16 +183,6 @@ CHAPTER_CONTEXT_RULES = {
             "说明返回值和注意事项",
         ],
     },
-    "API参考": {
-        "structure_depth": 2,
-        "need_relations": True,
-        "need_code": True,
-        "writing_hints": [
-            "列出类和方法签名",
-            "说明参数和返回值",
-            "提供使用示例",
-        ],
-    },
     "开发指南": {
         "structure_depth": 2,
         "need_relations": True,
@@ -90,16 +191,6 @@ CHAPTER_CONTEXT_RULES = {
             "说明如何扩展新功能",
             "提供基类接口说明",
             "给出开发示例",
-        ],
-    },
-    "使用示例": {
-        "structure_depth": 1,
-        "need_relations": False,
-        "need_code": True,
-        "writing_hints": [
-            "提供完整的使用场景",
-            "展示代码和配置",
-            "解释关键步骤",
         ],
     },
 }
@@ -155,13 +246,34 @@ class ChapterContext:
         lines = []
 
         if code_info.get("classes"):
-            for cls in code_info["classes"][:3]:
-                lines.append(f"### {cls.get('name', 'Unknown')}")
-                if cls.get("docstring"):
-                    lines.append(cls["docstring"][:200])
-                if cls.get("methods"):
-                    lines.append(f"方法: {', '.join(cls['methods'][:5])}")
+            for cls in code_info["classes"][:5]:
+                lines.append(f"### 类: {cls.get('name', 'Unknown')}")
                 lines.append("")
+
+                if cls.get("bases"):
+                    lines.append(f"**继承自**: {', '.join(cls['bases'])}")
+                    lines.append("")
+
+                if cls.get("docstring"):
+                    lines.append(cls["docstring"][:300])
+                    lines.append("")
+
+                if cls.get("methods"):
+                    lines.append("**方法**:")
+                    for method in cls["methods"][:8]:
+                        method_str = f"- `{method['name']}"
+                        if method.get("parameters"):
+                            params = ", ".join(str(p) for p in method["parameters"][:5])
+                            method_str += f"({params})"
+                        else:
+                            method_str += "()"
+                        if method.get("return_type"):
+                            method_str += f" -> {method['return_type']}"
+                        method_str += "`"
+                        lines.append(method_str)
+                        if method.get("docstring"):
+                            lines.append(f"  {method['docstring'][:100]}")
+                    lines.append("")
 
         if code_info.get("api_summary"):
             lines.append(code_info["api_summary"][:2000])
@@ -290,45 +402,67 @@ class ContextBuilder:
             "api_summary": "",
         }
 
-        if class_name and module_path:
-            class_detail = self.analyzer.get_class_details(module_path, class_name)
-            if class_detail:
-                code_info["classes"] = [{"name": class_name, "detail": class_detail}]
-            return code_info
-
         if module_path:
+            if class_name:
+                info = self.analyzer.analyze_module(module_path)
+                if info:
+                    for cls in info.classes:
+                        if cls.name == class_name:
+                            code_info["classes"].append(self._format_class_info(cls))
+                            break
+                return code_info
+
             module_info = self.analyzer.get_api_summary([module_path])
             code_info["api_summary"] = module_info
             all_classes = self.analyzer.get_all_classes([module_path])
             for path, name, cls in all_classes[:3]:
-                code_info["classes"].append(
-                    {
-                        "name": cls.name,
-                        "docstring": cls.docstring,
-                        "methods": [m.name for m in cls.methods[:5]],
-                    }
-                )
+                code_info["classes"].append(self._format_class_info(cls))
             return code_info
 
         for dir_name in relevant_dirs[:2]:
-            dir_path = self.analyzer.project_path / dir_name
-            if dir_path.exists():
-                py_files = list(dir_path.rglob("*.py"))[:3]
+            actual_path = self._find_actual_dir(dir_name)
+            if actual_path and actual_path.exists():
+                py_files = [
+                    f for f in actual_path.rglob("*.py") if not f.name.startswith("__")
+                ][:5]
                 module_paths = [
-                    str(f.relative_to(self.analyzer.project_path))
-                    .replace(".py", "")
-                    .replace("/", ".")
-                    .replace("\\", ".")
+                    str(
+                        f.relative_to(self.analyzer.project_path).with_suffix("")
+                    ).replace(os.sep, ".")
                     for f in py_files
                 ]
                 all_classes = self.analyzer.get_all_classes(module_paths)
                 for path, name, cls in all_classes[:5]:
-                    code_info["classes"].append(
-                        {
-                            "name": cls.name,
-                            "docstring": cls.docstring,
-                            "methods": [m.name for m in cls.methods[:5]],
-                        }
-                    )
+                    code_info["classes"].append(self._format_class_info(cls))
 
         return code_info
+
+    def _find_actual_dir(self, dir_name: str) -> Optional[Path]:
+        actual_path = self.analyzer.project_path / dir_name
+        if actual_path.exists():
+            return actual_path
+
+        for root_dir in self.project_structure.structure.keys():
+            actual_path = self.analyzer.project_path / root_dir / dir_name
+            if actual_path.exists():
+                return actual_path
+
+        return None
+
+    def _format_class_info(self, cls) -> dict:
+        return {
+            "name": cls.name,
+            "bases": cls.bases if hasattr(cls, "bases") else [],
+            "docstring": cls.docstring if hasattr(cls, "docstring") else "",
+            "methods": [
+                {
+                    "name": m.name,
+                    "parameters": [str(p) for p in m.parameters]
+                    if hasattr(m, "parameters")
+                    else [],
+                    "return_type": m.return_type if hasattr(m, "return_type") else "",
+                    "docstring": m.docstring if hasattr(m, "docstring") else "",
+                }
+                for m in (cls.methods if hasattr(cls, "methods") else [])
+            ],
+        }

@@ -1,7 +1,7 @@
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Literal
 import yaml
 
 
@@ -12,9 +12,9 @@ class LLMConfig:
     model: str = "gpt-4o"
     temperature: float = 0.7
     max_tokens: int = 4096
-    timeout: float = 300.0  # 请求超时时间（秒）
-    max_retries: int = 3  # 最大重试次数
-    stream: bool = True  # 是否使用流式输出
+    timeout: float = 300.0
+    max_retries: int = 3
+    stream: bool = True
 
 
 @dataclass
@@ -44,19 +44,23 @@ class ScanConfig:
 
 @dataclass
 class CustomizationConfig:
-    """自定义文档风格配置"""
-
     style_guide: str = ""
     extra_context: str = ""
 
 
 @dataclass
 class InferenceRulesConfig:
-    """推断规则配置"""
-
     directory_types: dict = field(default_factory=dict)
     module_relations: list = field(default_factory=list)
     project_type: str = ""
+
+
+DocType = Literal["user_manual", "developer_manual"]
+
+
+@dataclass
+class DocConfig:
+    doc_type: DocType = "user_manual"
 
 
 @dataclass
@@ -66,6 +70,7 @@ class Config:
     scan: ScanConfig = field(default_factory=ScanConfig)
     customization: CustomizationConfig = field(default_factory=CustomizationConfig)
     inference_rules: InferenceRulesConfig = field(default_factory=InferenceRulesConfig)
+    doc: DocConfig = field(default_factory=DocConfig)
 
     @classmethod
     def load(cls, path: str) -> "Config":
@@ -142,6 +147,15 @@ class Config:
                     k: v
                     for k, v in data["inference_rules"].items()
                     if k in InferenceRulesConfig.__dataclass_fields__
+                }
+            )
+
+        if "doc" in data:
+            config.doc = DocConfig(
+                **{
+                    k: v
+                    for k, v in data["doc"].items()
+                    if k in DocConfig.__dataclass_fields__
                 }
             )
 
